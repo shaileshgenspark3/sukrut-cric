@@ -10,13 +10,16 @@ serve(async (req) => {
 
         const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
             email: "admin@sukrut.com",
-            password: "@12@",
+            password: "Admin123!",
             email_confirm: true,
         });
 
-        if (authError && !authError.message.includes("already exists") && !authError.message.includes("User already registered")) {
+        if (authError && !authError.message.includes("already exists") && !authError.message.includes("User already registered") && !authError.message.includes("already registered")) {
+            console.error("Auth error:", authError.message);
             throw authError;
         }
+
+        console.log("Auth step completed. User exists or was created.");
 
         let userId = authData?.user?.id;
 

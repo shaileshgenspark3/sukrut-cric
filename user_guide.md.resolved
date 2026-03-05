@@ -1,0 +1,57 @@
+# 🏆 Sukrut Premier League: Official Auction Guide
+
+Welcome to the **10X Upgrade** of the SPL Auction Portal. This guide contains everything you need to know to access and navigate the mission-critical systems during the live auction.
+
+---
+
+## 🚀 The Portal
+**URL**: [https://sukrut-cric.vercel.app](https://sukrut-cric.vercel.app)
+
+> [!IMPORTANT]
+> The app uses **Real-time Synchronization**. Ensure you have a stable internet connection for the best experience.
+
+---
+
+## 🛡️ For Admins: Tactical Ops Console
+The Admin Portal is your mission control. You manage the pulse of the auction.
+
+### 🔑 Access
+1. Visit the [Login Page](https://sukrut-cric.vercel.app/login?role=admin).
+2. Use the credentials specifically provided for **Intel/Tactical Ops**.
+3. **Role Check**: Ensure "Tactical Ops" is displayed at the top.
+
+### 🎮 Features
+- **Live Controller**: Use the "SOLD" and "UNSOLD" buttons to finalize bids. 
+- **Player Queue**: Deploy the next player to the block with a single click.
+- **System Settings**: Control bid increments and auction status (Start/Pause) from the "Economic Protocols" tab.
+- **Victory Feedback**: Upon clicking "SOLD", a celebratory confetti effect will trigger globally!
+
+---
+
+## 👨‍✈️ For Captains: Battle Station
+Your dashboard is designed for high-stakes decision making.
+
+### 🔑 Access
+1. Visit the [Login Page](https://sukrut-cric.vercel.app/login?role=captain).
+2. **Email**: `captain[number]@sukrut.com`
+3. **Password**: `captain[number]@123`
+   *(Example: Captain #1 uses `captain1@sukrut.com` and `captain1@123`)*
+
+### 💥 Bidding Strategy
+- **The Bid Button**: A single tap submits the next valid bid. The button pulses when you are "Engaging" (sending bid).
+- **Valuation**: Real-time ticker shows the current highest bid and your team's name if you are the lead bidder.
+- **Fuel Gauge (Purse)**: Monitor your "Available Purse" carefully. It turns from Gold to Red as your funds deplete.
+- **Fleet Combatants (Roster)**: Track your acquired assets in the bottom section. Each player's tier (A+, A, etc.) is highlighted.
+
+> [!TIP]
+> **Mission Accomplished!** When you win a player, a full-screen victory overlay will appear. Celebrate, then focus on your next target!
+
+---
+
+## 🛠️ Troubleshooting
+- **Lag?**: Refresh the page. The Supabase real-time engine will resync your state immediately.
+- **Login Issues?**: Ensure you are on the correct portal (Admin vs. Captain). There is a "Terminal Switch" button at the bottom of the login card.
+
+---
+
+© 2026 Sukrut Parivar | **Excellence. Precision. Victory.**
