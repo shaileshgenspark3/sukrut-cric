@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRealtimeSubscription } from "@/hooks/useRealtime";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRealtimeSubscription } from '@/hooks/useRealtime';
 import {
     Loader2, LogOut, LayoutDashboard, Users, Gavel,
     Settings, ListPlus, PlayCircle, PauseCircle,
     CheckCircle, XCircle, Activity, Shield,
-    Trophy, Search, Filter, ChevronRight
-} from "lucide-react";
+    Trophy, Search, Filter, ChevronRight,
+    Download, Upload, Plus, Trash2, Edit, X
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
+import Papa from 'papaparse';
 
 export default function AdminDashboard() {
     const router = useRouter();
@@ -20,6 +22,15 @@ export default function AdminDashboard() {
     const [activeTab, setActiveTab] = useState("dashboard");
     const [userId, setUserId] = useState<string | null>(null);
     const [isCoreAdmin, setIsCoreAdmin] = useState(false);
+
+    // Modal states
+    const [showAddCaptain, setShowAddCaptain] = useState(false);
+    const [showEditCaptain, setShowEditCaptain] = useState(false);
+    const [showAddPlayer, setShowAddPlayer] = useState(false);
+    const [showEditPlayer, setShowEditPlayer] = useState(false);
+    const [selectedCaptain, setSelectedCaptain] = useState<any>(null);
+    const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
+    const [deleteConfirm, setDeleteConfirm] = useState<{type: 'captain' | 'player', id: string, name: string} | null>(null);
 
     useEffect(() => {
         supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -46,11 +57,26 @@ export default function AdminDashboard() {
     useRealtimeSubscription('auction_rules', ['rules']);
     useRealtimeSubscription('bids', ['recent_bids']);
 
-    const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: async () => (await supabase.from("tournament_settings").select("*").single()).data });
-    const { data: teams } = useQuery({ queryKey: ["teams"], queryFn: async () => (await supabase.from("teams").select("*")).data });
-    const { data: players } = useQuery({ queryKey: ["players"], queryFn: async () => (await supabase.from("players").select("*, team:teams(*)").order('name')).data });
-    const { data: rules } = useQuery({ queryKey: ["rules"], queryFn: async () => (await supabase.from("auction_rules").select("*, team:teams(*)")).data });
-    const { data: auctionState } = useQuery({ queryKey: ["auction_state"], queryFn: async () => (await supabase.from("auction_state").select("*, current_player:players(*), current_bidder:teams(*)").single()).data });
+    const { data: settings } = useQuery({
+        queryKey: ["settings"],
+        queryFn: async () => (await supabase.from("tournament_settings").select("*").single()).data
+    });
+    const { data: teams } = useQuery({
+        queryKey: ["teams"],
+        queryFn: async () => (await supabase.from("teams").select("*")).data
+    });
+    const { data: players } = useQuery({
+        queryKey: ["players"],
+        queryFn: async () => (await supabase.from("players").select("*, team:teams(*)").order('name')).data
+    });
+    const { data: rules } = useQuery({
+        queryKey: ["rules"],
+        queryFn: async () => (await supabase.from("auction_rules").select("*, team:teams(*)")).data
+    });
+    const { data: auctionState } = useQuery({
+        queryKey: ["auction_state"],
+        queryFn: async () => (await supabase.from("auction_state").select("*, current_player:players(*), current_bidder:teams(*)").single()).data
+    });
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
@@ -68,7 +94,6 @@ export default function AdminDashboard() {
 
     return (
         <div className="min-h-screen bg-background mesh-gradient flex flex-col md:flex-row">
-
             {/* Sidebar */}
             <aside className="w-full md:w-80 bg-slate-950/40 border-r border-white/5 flex flex-col backdrop-blur-2xl relative z-20">
                 <div className="p-8 border-b border-white/5">
@@ -138,12 +163,939 @@ export default function AdminDashboard() {
     );
 }
 
-// --- SUB TABS --- //
+// --- MODALS ---
 
-function OverviewTab({ teams, players, settings }: any) {
+function AddCaptainModal({ show, onClose, onSuccess }: any) {
+    const [formData, setFormData] = useState({
+        team_name: '',
+        captain_name: '',
+        email: '',
+        password: '',
+        phone_number: ''
+    });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+
+        try {
+            // Create auth user
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+                email: formData.email,
+                password: formData.password,
+                email_confirm: true
+            });
+
+            if (authError) throw authError;
+
+            // Assign captain role
+            await supabase.from('user_roles').insert({
+                user_id: authData.user!.id,
+                role: 'captain'
+            });
+
+            // Create team
+            const { data: teamData, error: teamError } = await supabase.from('teams').insert({
+                team_name: formData.team_name,
+                captain_name: formData.captain_name,
+                captain_user_id: authData.user!.id,
+                captain_email: formData.email,
+                captain_password: formData.password,
+                phone_number: formData.phone_number,
+                team_logo_url: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(formData.team_name)}`,
+                captain_image_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formData.captain_name)}`
+            }).select().single();
+
+            if (teamError) throw teamError;
+
+            // Create auction rules
+            await supabase.from('auction_rules').insert({
+                team_id: teamData.id,
+                captain_deduction: 0,
+                starting_purse: 30000
+            });
+
+            onSuccess();
+            onClose();
+        } catch (err: any) {
+            setError(err.message || 'Failed to create captain');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!show) return null;
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="glass-card bg-slate-900 border border-white/10 rounded-[2.5rem] p-10 max-w-md w-full mx-4 shadow-2xl"
+            >
+                <div className="flex justify-between items-center mb-8">
+                    <h3 className="font-display text-2xl font-black text-white tracking-tight">ADD NEW CAPTAIN</h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-6">
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Team Name</label>
+                        <input
+                            type="text"
+                            value={formData.team_name}
+                            onChange={e => setFormData({ ...formData, team_name: e.target.value })}
+                            required
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Captain Name</label>
+                        <input
+                            type="text"
+                            value={formData.captain_name}
+                            onChange={e => setFormData({ ...formData, captain_name: e.target.value })}
+                            required
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Email</label>
+                            <input
+                                type="email"
+                                value={formData.email}
+                                onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                required
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Password</label>
+                            <input
+                                type="text"
+                                value={formData.password}
+                                onChange={e => setFormData({ ...formData, password: e.target.value })}
+                                required
+                                minLength={6}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Phone Number</label>
+                        <input
+                            type="tel"
+                            value={formData.phone_number}
+                            onChange={e => setFormData({ ...formData, phone_number: e.target.value })}
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                    </div>
+
+                    {error && (
+                        <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm p-4 rounded-xl">{error}</div>
+                    )}
+
+                    <div className="flex gap-4 pt-4">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            disabled={loading}
+                            className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                        >
+                            CANCEL
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)] disabled:opacity-50"
+                        >
+                            {loading ? <Loader2 className="w-5 h-5 animate-spin inline" /> : 'CREATE CAPTAIN'}
+                        </button>
+                    </div>
+                </form>
+            </motion.div>
+        </div>
+    );
+}
+
+function EditCaptainModal({ show, onClose, captain, onSuccess }: any) {
+    const [formData, setFormData] = useState({
+        team_name: captain?.team_name || '',
+        captain_name: captain?.captain_name || '',
+        phone_number: captain?.phone_number || '',
+        captain_email: captain?.captain_email || '',
+        captain_password: captain?.captain_password || ''
+    });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+
+        try {
+            const { error: teamError } = await supabase.from('teams').update({
+                team_name: formData.team_name,
+                captain_name: formData.captain_name,
+                phone_number: formData.phone_number
+            }).eq('id', captain.id);
+
+            if (teamError) throw teamError;
+
+            onSuccess();
+            onClose();
+        } catch (err: any) {
+            setError(err.message || 'Failed to update captain');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!show) return null;
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="glass-card bg-slate-900 border border-white/10 rounded-[2.5rem] p-10 max-w-md w-full mx-4 shadow-2xl"
+            >
+                <div className="flex justify-between items-center mb-8">
+                    <h3 className="font-display text-2xl font-black text-white tracking-tight">EDIT CAPTAIN</h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-6">
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Team Name</label>
+                        <input
+                            type="text"
+                            value={formData.team_name}
+                            onChange={e => setFormData({ ...formData, team_name: e.target.value })}
+                            required
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Captain Name</label>
+                        <input
+                            type="text"
+                            value={formData.captain_name}
+                            onChange={e => setFormData({ ...formData, captain_name: e.target.value })}
+                            required
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Email</label>
+                            <input
+                                type="email"
+                                value={formData.captain_email}
+                                disabled
+                                className="w-full bg-slate-800/50 border border-white/5 rounded-2xl px-6 py-4 text-slate-500 outline-none cursor-not-allowed"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Password</label>
+                            <input
+                                type="text"
+                                value={formData.captain_password}
+                                onChange={e => setFormData({ ...formData, captain_password: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">Phone Number</label>
+                        <input
+                            type="tel"
+                            value={formData.phone_number}
+                            onChange={e => setFormData({ ...formData, phone_number: e.target.value })}
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                    </div>
+
+                    {error && (
+                        <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm p-4 rounded-xl">{error}</div>
+                    )}
+
+                    <div className="flex gap-4 pt-4">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            disabled={loading}
+                            className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                        >
+                            CANCEL
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)] disabled:opacity-50"
+                        >
+                            {loading ? <Loader2 className="w-5 h-5 animate-spin inline" /> : 'UPDATE CAPTAIN'}
+                        </button>
+                    </div>
+                </form>
+            </motion.div>
+        </div>
+    );
+}
+
+function AddPlayerModal({ show, onClose, onSuccess }: any) {
+    const [formData, setFormData] = useState({
+        name: '',
+        category: 'B',
+        age: 25,
+        height: '',
+        handy: 'Right-hand',
+        type: 'Top-order',
+        earlier_seasons: '',
+        achievements: '',
+        special_remarks: '',
+        playing_role: 'Batsman',
+        gender: 'Male',
+        base_price: 1000,
+        image_url: ''
+    });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+
+        try {
+            const { data, error } = await supabase.from('players').insert({
+                name: formData.name,
+                category: formData.category,
+                age: formData.age,
+                height: formData.height,
+                handy: formData.handy,
+                type: formData.type,
+                earlier_seasons: formData.earlier_seasons,
+                achievements: formData.achievements,
+                special_remarks: formData.special_remarks,
+                playing_role: formData.playing_role,
+                gender: formData.gender,
+                base_price: formData.base_price,
+                image_url: formData.image_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formData.name)}`
+            });
+
+            if (error) throw error;
+
+            onSuccess();
+            onClose();
+            setFormData({
+                name: '', category: 'B', age: 25, height: '', handy: 'Right-hand', type: 'Top-order',
+                earlier_seasons: '', achievements: '', special_remarks: '',
+                playing_role: 'Batsman', gender: 'Male', base_price: 1000, image_url: ''
+            });
+        } catch (err: any) {
+            setError(err.message || 'Failed to create player');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!show) return null;
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl overflow-y-auto py-8">
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="glass-card bg-slate-900 border border-white/10 rounded-[2rem] p-8 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto shadow-2xl"
+            >
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-display text-2xl font-black text-white tracking-tight">ADD NEW PLAYER</h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Name *</label>
+                            <input
+                                type="text"
+                                value={formData.name}
+                                onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                required
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Category *</label>
+                            <select
+                                value={formData.category}
+                                onChange={e => setFormData({ ...formData, category: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="A+">A+ (Platinum)</option>
+                                <option value="A">A (Gold)</option>
+                                <option value="B">B (Silver)</option>
+                                <option value="C">C (Standard)</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Age</label>
+                            <input
+                                type="number"
+                                value={formData.age}
+                                onChange={e => setFormData({ ...formData, age: parseInt(e.target.value) || 0 })}
+                                min={15}
+                                max={50}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Height</label>
+                            <input
+                                type="text"
+                                value={formData.height}
+                                onChange={e => setFormData({ ...formData, height: e.target.value })}
+                                placeholder="e.g., 5&apos;8&quot; or 175cm"
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Handy</label>
+                            <select
+                                value={formData.handy}
+                                onChange={e => setFormData({ ...formData, handy: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="Right-hand">Right-hand Bat</option>
+                                <option value="Left-hand">Left-hand Bat</option>
+                                <option value="Right-arm">Right-arm Bowl</option>
+                                <option value="Left-arm">Left-arm Bowl</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Type</label>
+                            <select
+                                value={formData.type}
+                                onChange={e => setFormData({ ...formData, type: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="Top-order">Top-order</option>
+                                <option value="Middle-order">Middle-order</option>
+                                <option value="Opener">Opener</option>
+                                <option value="Finisher">Finisher</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Earlier Seasons</label>
+                            <input
+                                type="text"
+                                value={formData.earlier_seasons}
+                                onChange={e => setFormData({ ...formData, earlier_seasons: e.target.value })}
+                                placeholder="e.g., 2022, 2023"
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Achievements</label>
+                            <input
+                                type="text"
+                                value={formData.achievements}
+                                onChange={e => setFormData({ ...formData, achievements: e.target.value })}
+                                placeholder="Notable achievements or awards"
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Combat Role *</label>
+                            <select
+                                value={formData.playing_role}
+                                onChange={e => setFormData({ ...formData, playing_role: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="Batsman">Batsman</option>
+                                <option value="Bowler">Bowler</option>
+                                <option value="All-rounder">All-rounder</option>
+                                <option value="Wicket-keeper">Wicket-keeper</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Variant *</label>
+                            <select
+                                value={formData.gender}
+                                onChange={e => setFormData({ ...formData, gender: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Special Remarks</label>
+                        <textarea
+                            value={formData.special_remarks}
+                            onChange={e => setFormData({ ...formData, special_remarks: e.target.value })}
+                            placeholder="Additional notes or special remarks"
+                            rows={2}
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all resize-none"
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Market Base (₹) *</label>
+                        <input
+                            type="number"
+                            value={formData.base_price}
+                            onChange={e => setFormData({ ...formData, base_price: parseInt(e.target.value) || 0 })}
+                            required
+                            min={100}
+                            step={100}
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                    </div>
+
+                    {error && (
+                        <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm p-4 rounded-xl">{error}</div>
+                    )}
+
+                    <div className="flex gap-4 pt-4">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            disabled={loading}
+                            className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                        >
+                            CANCEL
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)] disabled:opacity-50"
+                        >
+                            {loading ? <Loader2 className="w-5 h-5 animate-spin inline" /> : 'CREATE PLAYER'}
+                        </button>
+                    </div>
+                </form>
+            </motion.div>
+        </div>
+    );
+}
+
+function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
+    const [formData, setFormData] = useState({
+        name: player?.name || '',
+        category: player?.category || 'B',
+        age: player?.age || 25,
+        height: player?.height || '',
+        handy: player?.handy || 'Right-hand',
+        type: player?.type || 'Top-order',
+        earlier_seasons: player?.earlier_seasons || '',
+        achievements: player?.achievements || '',
+        special_remarks: player?.special_remarks || '',
+        playing_role: player?.playing_role || 'Batsman',
+        gender: player?.gender || 'Male',
+        base_price: player?.base_price || 1000,
+        image_url: player?.image_url || ''
+    });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+
+        try {
+            const { error } = await supabase.from('players').update({
+                name: formData.name,
+                category: formData.category,
+                age: formData.age,
+                height: formData.height,
+                handy: formData.handy,
+                type: formData.type,
+                earlier_seasons: formData.earlier_seasons,
+                achievements: formData.achievements,
+                special_remarks: formData.special_remarks,
+                playing_role: formData.playing_role,
+                gender: formData.gender,
+                base_price: formData.base_price,
+                image_url: formData.image_url
+            }).eq('id', player.id);
+
+            if (error) throw error;
+
+            onSuccess();
+            onClose();
+        } catch (err: any) {
+            setError(err.message || 'Failed to update player');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!show) return null;
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl overflow-y-auto py-8">
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="glass-card bg-slate-900 border border-white/10 rounded-[2rem] p-8 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto shadow-2xl"
+            >
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-display text-2xl font-black text-white tracking-tight">EDIT PLAYER</h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Name *</label>
+                            <input
+                                type="text"
+                                value={formData.name}
+                                onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                required
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Category *</label>
+                            <select
+                                value={formData.category}
+                                onChange={e => setFormData({ ...formData, category: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="A+">A+ (Platinum)</option>
+                                <option value="A">A (Gold)</option>
+                                <option value="B">B (Silver)</option>
+                                <option value="C">C (Standard)</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Age</label>
+                            <input
+                                type="number"
+                                value={formData.age}
+                                onChange={e => setFormData({ ...formData, age: parseInt(e.target.value) || 0 })}
+                                min={15}
+                                max={50}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Height</label>
+                            <input
+                                type="text"
+                                value={formData.height}
+                                onChange={e => setFormData({ ...formData, height: e.target.value })}
+                                placeholder="e.g., 5&apos;8&quot; or 175cm"
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Handy</label>
+                            <select
+                                value={formData.handy}
+                                onChange={e => setFormData({ ...formData, handy: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="Right-hand">Right-hand Bat</option>
+                                <option value="Left-hand">Left-hand Bat</option>
+                                <option value="Right-arm">Right-arm Bowl</option>
+                                <option value="Left-arm">Left-arm Bowl</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Type</label>
+                            <select
+                                value={formData.type}
+                                onChange={e => setFormData({ ...formData, type: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="Top-order">Top-order</option>
+                                <option value="Middle-order">Middle-order</option>
+                                <option value="Opener">Opener</option>
+                                <option value="Finisher">Finisher</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Earlier Seasons</label>
+                            <input
+                                type="text"
+                                value={formData.earlier_seasons}
+                                onChange={e => setFormData({ ...formData, earlier_seasons: e.target.value })}
+                                placeholder="e.g., 2022, 2023"
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Achievements</label>
+                            <input
+                                type="text"
+                                value={formData.achievements}
+                                onChange={e => setFormData({ ...formData, achievements: e.target.value })}
+                                placeholder="Notable achievements or awards"
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Combat Role *</label>
+                            <select
+                                value={formData.playing_role}
+                                onChange={e => setFormData({ ...formData, playing_role: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="Batsman">Batsman</option>
+                                <option value="Bowler">Bowler</option>
+                                <option value="All-rounder">All-rounder</option>
+                                <option value="Wicket-keeper">Wicket-keeper</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Variant *</label>
+                            <select
+                                value={formData.gender}
+                                onChange={e => setFormData({ ...formData, gender: e.target.value })}
+                                className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                            >
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Special Remarks</label>
+                        <textarea
+                            value={formData.special_remarks}
+                            onChange={e => setFormData({ ...formData, special_remarks: e.target.value })}
+                            placeholder="Additional notes or special remarks"
+                            rows={2}
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all resize-none"
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Market Base (₹) *</label>
+                        <input
+                            type="number"
+                            value={formData.base_price}
+                            onChange={e => setFormData({ ...formData, base_price: parseInt(e.target.value) || 0 })}
+                            required
+                            min={100}
+                            step={100}
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                    </div>
+
+                    {error && (
+                        <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm p-4 rounded-xl">{error}</div>
+                    )}
+
+                    <div className="flex gap-4 pt-4">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            disabled={loading}
+                            className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                        >
+                            CANCEL
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)] disabled:opacity-50"
+                        >
+                            {loading ? <Loader2 className="w-5 h-5 animate-spin inline" /> : 'UPDATE PLAYER'}
+                        </button>
+                    </div>
+                </form>
+            </motion.div>
+        </div>
+    );
+}
+
+function ConfirmDeleteModal({ show, onClose, onConfirm, type, name }: any) {
+    if (!show) return null;
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="glass-card bg-slate-900 border border-destructive/20 rounded-[2rem] p-8 max-w-md w-full mx-4 shadow-2xl"
+            >
+                <div className="text-center">
+                    <div className="w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-destructive/20">
+                        <Trash2 className="w-8 h-8 text-destructive" />
+                    </div>
+                    <h3 className="font-display text-2xl font-black text-white tracking-tight mb-2">CONFIRM DELETION</h3>
+                    <p className="text-slate-400 font-sans mb-6">
+                        Are you sure you want to delete this {type}?<br/>
+                        <span className="text-white font-bold">{name}</span>
+                    </p>
+                    <div className="flex gap-4">
+                        <button
+                            onClick={onClose}
+                            className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                        >
+                            CANCEL
+                        </button>
+                        <button
+                            onClick={onConfirm}
+                            className="flex-1 py-4 rounded-2xl bg-destructive text-white hover:bg-destructive/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(239,68,68,0.2)]"
+                        >
+                            DELETE
+                        </button>
+                    </div>
+                </div>
+            </motion.div>
+        </div>
+    );
+}
+
+// --- SUB TABS -- //
+
+function OverviewTab({ teams, players, settings, ...modalProps }: any) {
+    const queryClient = useQueryClient();
     const soldPlayers = players?.filter((p: any) => p.is_sold).length || 0;
     const totalPlayers = players?.length || 0;
     const progress = totalPlayers > 0 ? (soldPlayers / totalPlayers) * 100 : 0;
+
+    // CSV Import/Export handlers for captains
+    const captainsFileInputRef = useRef<HTMLInputElement>(null);
+
+    const exportCaptainsCSV = () => {
+        if (!teams || teams.length === 0) return;
+
+        const headers = ['Team Name', 'Captain Name', 'Email', 'Password', 'Phone Number', 'Created Date'];
+        const data = teams.map((t: any) => [
+            t.team_name,
+            t.captain_name,
+            t.captain_email,
+            t.captain_password,
+            t.phone_number || '',
+            t.created_at || ''
+        ]);
+        const csv = Papa.unparse([headers, ...data]);
+        downloadCSV(csv, 'captains.csv');
+    };
+
+    const importCaptainsCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: async (results) => {
+                const rows = results.data as any[];
+                let successCount = 0;
+                let skipCount = 0;
+
+                for (const row of rows) {
+                    if (!row['Team Name'] || !row['Captain Name'] || !row['Email'] || !row['Password']) continue;
+
+                    try {
+                        const email = row['Email'].trim();
+                        const password = row['Password'].trim();
+
+                        // Create auth user
+                        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+                            email,
+                            password,
+                            email_confirm: true
+                        });
+
+                        if (authError) {
+                            if (authError.message.includes('already exists')) {
+                                skipCount++;
+                                continue;
+                            }
+                            throw authError;
+                        }
+
+                        // Assign captain role
+                        await supabase.from('user_roles').insert({
+                            user_id: authData.user!.id,
+                            role: 'captain'
+                        });
+
+                        // Create team
+                        const { data: teamData } = await supabase.from('teams').insert({
+                            team_name: row['Team Name'].trim(),
+                            captain_name: row['Captain Name'].trim(),
+                            captain_user_id: authData.user!.id,
+                            captain_email: email,
+                            captain_password: password,
+                            phone_number: row['Phone Number']?.trim() || '',
+                            team_logo_url: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(row['Team Name'].trim())}`,
+                            captain_image_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(row['Captain Name'].trim())}`
+                        }).select().single();
+
+                        // Create auction rules
+                        if (teamData?.id) {
+                            await supabase.from('auction_rules').insert({
+                                team_id: teamData.id,
+                                captain_deduction: 0,
+                                starting_purse: 30000
+                            });
+                        }
+
+                        successCount++;
+                    } catch (err) {
+                        console.error('Error importing captain:', err);
+                    }
+                }
+
+                alert(`Import completed!\nCreated: ${successCount}\nSkipped (already exists): ${skipCount}`);
+                queryClient.invalidateQueries({ queryKey: ['teams'] });
+                if (captainsFileInputRef.current) {
+                    captainsFileInputRef.current.value = '';
+                }
+            },
+            error: (error) => {
+                alert('Error parsing CSV: ' + error.message);
+            }
+        });
+    };
 
     return (
         <motion.div
@@ -188,13 +1140,36 @@ function OverviewTab({ teams, players, settings }: any) {
                             <h3 className="font-display text-2xl font-black text-white mb-1 uppercase tracking-tight">Captain Access Matrix</h3>
                             <p className="text-slate-500 text-sm font-sans">Active authentication tokens and credentials</p>
                         </div>
-                        <button className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-colors">EXPORT LOGS</button>
+                        <div className="flex gap-2">
+                            <input
+                                type="file"
+                                ref={captainsFileInputRef}
+                                onChange={importCaptainsCSV}
+                                accept=".csv"
+                                className="hidden"
+                            />
+                            <button
+                                onClick={() => captainsFileInputRef.current?.click()}
+                                className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-colors flex items-center gap-2"
+                            >
+                                <Upload className="w-4 h-4" />
+                                IMPORT CSV
+                            </button>
+                            <button
+                                onClick={exportCaptainsCSV}
+                                className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-colors flex items-center gap-2"
+                            >
+                                <Download className="w-4 h-4" />
+                                EXPORT CSV
+                            </button>
+                        </div>
                     </div>
 
-                    <div className="overflow-x-auto scrollbar-hide">
+                    <div className="overflow-x-auto scrollbar-hide max-h-[60vh]">
                         <table className="w-full text-left text-sm whitespace-nowrap">
-                            <thead className="text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase border-b border-white/5">
-                                <tr>
+                            <thead className="sticky top-0 z-20 bg-slate-950/80 backdrop-blur-xl border-b border-white/5">
+                                <tr className="text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase">
+                                    <th className="px-4 py-4">Actions</th>
                                     <th className="px-4 py-5">Corporate Entity</th>
                                     <th className="px-4 py-5">Commanding Officer</th>
                                     <th className="px-4 py-5">Access Identification</th>
@@ -205,6 +1180,24 @@ function OverviewTab({ teams, players, settings }: any) {
                             <tbody className="divide-y divide-white/5">
                                 {teams?.map((t: any) => (
                                     <tr key={t.id} className="group/row hover:bg-white/[0.02] transition-colors">
+                                        <td className="px-4 py-4">
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => modalProps.setSelectedCaptain(t)}
+                                                    className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors"
+                                                    title="Edit Captain"
+                                                >
+                                                    <Edit className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => modalProps.setDeleteConfirm({ type: 'captain', id: t.id, name: t.team_name })}
+                                                    className="p-2 bg-destructive/10 hover:bg-destructive/20 text-destructive rounded-lg transition-colors"
+                                                    title="Delete Captain"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </td>
                                         <td className="px-4 py-6">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-10 h-10 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center p-1.5 grayscale group-hover/row:grayscale-0 transition-all">
@@ -266,15 +1259,103 @@ function StatCard({ title, value, icon: Icon, color, accent, isLive }: any) {
     );
 }
 
-function PlayersTab({ players }: any) {
+function PlayersTab({ players, ...modalProps }: any) {
     const [search, setSearch] = useState("");
     const [filterCat, setFilterCat] = useState("All");
+    const playersFileInputRef = useRef<HTMLInputElement>(null);
 
     const filtered = players?.filter((p: any) => {
         if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
         if (filterCat !== "All" && p.category !== filterCat) return false;
         return true;
     });
+
+    // Generate serial number for display
+    const getFilteredWithSerial = () => {
+        return filtered?.map((p: any, index: number) => ({ ...p, serialNo: index + 1 }));
+    };
+
+    const filteredWithSerial = getFilteredWithSerial();
+
+    const exportPlayersCSV = () => {
+        if (!players || players.length === 0) return;
+
+        const headers = ['Serial No.', 'Name', 'Classifications', 'Age', 'Height', 'Handy', 'Type', 'Earlier Seasons', 'Achievements', 'Special Remarks', 'Combat Role', 'Variant', 'Market Base', 'Status'];
+        const data = players.map((p: any) => [
+            '',
+            p.name,
+            p.category,
+            p.age || '',
+            p.height || '',
+            p.handy || '',
+            p.type || '',
+            p.earlier_seasons || '',
+            p.achievements || '',
+            p.special_remarks || '',
+            p.playing_role,
+            p.gender,
+            p.base_price,
+            p.is_sold ? 'Sold' : 'Available'
+        ]);
+        const csv = Papa.unparse([headers, ...data]);
+        downloadCSV(csv, 'players.csv');
+    };
+
+    const importPlayersCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: async (results) => {
+                const rows = results.data as any[];
+                let successCount = 0;
+                let skipCount = 0;
+
+                for (const row of rows) {
+                    if (!row['Name']) continue;
+
+                    const name = row['Name'].trim();
+                    const existingPlayer = players?.find((p: any) => p.name.toLowerCase() === name.toLowerCase());
+
+                    if (existingPlayer) {
+                        skipCount++;
+                        continue;
+                    }
+
+                    try {
+                        await supabase.from('players').insert({
+                            name,
+                            category: row['Classifications'] || 'B',
+                            age: parseInt(row['Age']) || 25,
+                            height: row['Height'] || '',
+                            handy: row['Handy'] || 'Right-hand',
+                            type: row['Type'] || 'Top-order',
+                            earlier_seasons: row['Earlier Seasons'] || '',
+                            achievements: row['Achievements'] || '',
+                            special_remarks: row['Special Remarks'] || '',
+                            playing_role: row['Combat Role'] || 'Batsman',
+                            gender: row['Variant'] || 'Male',
+                            base_price: parseInt(row['Market Base']) || 1000,
+                            image_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`
+                        });
+                        successCount++;
+                    } catch (err) {
+                        console.error('Error importing player:', err);
+                    }
+                }
+
+                alert(`Import completed!\nCreated: ${successCount}\nSkipped (already exists): ${skipCount}`);
+                if (playersFileInputRef.current) {
+                    playersFileInputRef.current.value = '';
+                }
+            },
+            error: (error) => {
+                alert('Error parsing CSV: ' + error.message);
+            }
+        });
+    };
 
     return (
         <motion.div
@@ -313,6 +1394,34 @@ function PlayersTab({ players }: any) {
                             <option value="C">Standard (C)</option>
                         </select>
                     </div>
+                    <input
+                        type="file"
+                        ref={playersFileInputRef}
+                        onChange={importPlayersCSV}
+                        accept=".csv"
+                        className="hidden"
+                    />
+                    <button
+                        onClick={() => playersFileInputRef.current?.click()}
+                        className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-colors flex items-center gap-2"
+                    >
+                        <Upload className="w-4 h-4" />
+                        IMPORT CSV
+                    </button>
+                    <button
+                        onClick={exportPlayersCSV}
+                        className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-colors flex items-center gap-2"
+                    >
+                        <Download className="w-4 h-4" />
+                        EXPORT CSV
+                    </button>
+                    <button
+                        onClick={() => modalProps.setShowAddPlayer(true)}
+                        className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest bg-gold text-black hover:bg-gold/90 transition-colors flex items-center gap-2"
+                    >
+                        <Plus className="w-4 h-4" />
+                        ADD PLAYER
+                    </button>
                 </div>
             </div>
 
@@ -321,18 +1430,47 @@ function PlayersTab({ players }: any) {
                     <table className="w-full text-left text-sm whitespace-nowrap">
                         <thead className="sticky top-0 z-20 bg-slate-950/80 backdrop-blur-xl border-b border-white/5">
                             <tr className="text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase">
-                                <th className="px-8 py-5">Player Profile</th>
-                                <th className="px-4 py-5">Classification</th>
+                                <th className="px-2 py-3">Actions</th>
+                                <th className="px-4 py-5">Serial No.</th>
+                                <th className="px-4 py-5">Name</th>
+                                <th className="px-4 py-5">Classifications</th>
+                                <th className="px-4 py-5">Age</th>
+                                <th className="px-4 py-5">Height</th>
+                                <th className="px-4 py-5">Handy</th>
+                                <th className="px-4 py-5">Type</th>
+                                <th className="px-4 py-5">Earlier Seasons</th>
+                                <th className="px-4 py-5">Achievements</th>
+                                <th className="px-4 py-5">Special Remarks</th>
                                 <th className="px-4 py-5">Combat Role</th>
                                 <th className="px-4 py-5">Variant</th>
                                 <th className="px-4 py-5 font-right">Market Base</th>
-                                <th className="px-8 py-5 text-right">Status</th>
+                                <th className="px-4 py-5 text-right">Status</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
-                            {filtered?.map((p: any) => (
+                            {filteredWithSerial?.map((p: any) => (
                                 <tr key={p.id} className="group/row hover:bg-white/[0.02] transition-colors">
-                                    <td className="px-8 py-6">
+                                    <td className="px-2 py-4">
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => modalProps.setSelectedPlayer(p)}
+                                                className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors"
+                                                title="Edit Player"
+                                            >
+                                                <Edit className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => !p.is_sold && modalProps.setDeleteConfirm({ type: 'player', id: p.id, name: p.name })}
+                                                disabled={p.is_sold}
+                                                className={`p-2 rounded-lg transition-colors ${p.is_sold ? 'bg-slate-800/30 text-slate-600 cursor-not-allowed' : 'bg-destructive/10 hover:bg-destructive/20 text-destructive'}`}
+                                                title="Delete Player"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-6 font-mono text-xs text-slate-500">{p.serialNo}</td>
+                                    <td className="px-4 py-6">
                                         <div className="flex items-center gap-4">
                                             <div className="relative">
                                                 <div className={`absolute -inset-1 rounded-full blur-md opacity-0 group-hover/row:opacity-20 transition-opacity ${p.category === 'A+' ? 'bg-gold' : 'bg-primary'}`} />
@@ -340,7 +1478,6 @@ function PlayersTab({ players }: any) {
                                             </div>
                                             <div>
                                                 <p className="font-display font-black text-white tracking-widest text-base group-hover/row:text-primary transition-colors uppercase">{p.name}</p>
-                                                <p className="text-[10px] text-slate-500 font-black tracking-widest uppercase">ID: {p.id.substring(0, 8)}</p>
                                             </div>
                                         </div>
                                     </td>
@@ -352,6 +1489,13 @@ function PlayersTab({ players }: any) {
                                             {p.category} TIER
                                         </span>
                                     </td>
+                                    <td className="px-4 py-6 text-slate-400 font-sans font-medium">{p.age || '-'}</td>
+                                    <td className="px-4 py-6 text-slate-400 font-sans font-medium">{p.height || '-'}</td>
+                                    <td className="px-4 py-6 text-slate-400 font-sans font-medium text-xs uppercase">{p.handy || '-'}</td>
+                                    <td className="px-4 py-6 text-slate-400 font-sans font-medium text-xs">{p.type || '-'}</td>
+                                    <td className="px-4 py-6 text-slate-400 font-sans font-medium text-xs">{p.earlier_seasons || '-'}</td>
+                                    <td className="px-4 py-6 text-slate-400 font-sans font-medium text-xs">{p.achievements || '-'}</td>
+                                    <td className="px-4 py-6 text-slate-400 font-sans font-medium text-xs">{p.special_remarks || '-'}</td>
                                     <td className="px-4 py-6 text-slate-400 font-sans font-medium">{p.playing_role}</td>
                                     <td className="px-4 py-6">
                                         <span className={`px-2 py-1 rounded-lg text-[10px] uppercase font-black border ${p.gender === 'Male' ? 'text-blue-400 border-blue-400/20 bg-blue-400/5' : 'text-pink-400 border-pink-400/20 bg-pink-400/5'}`}>
@@ -359,7 +1503,7 @@ function PlayersTab({ players }: any) {
                                         </span>
                                     </td>
                                     <td className="px-4 py-6 font-display font-black text-white text-base">₹{p.base_price.toLocaleString()}</td>
-                                    <td className="px-8 py-6 text-right">
+                                    <td className="px-4 py-6 text-right">
                                         {p.is_sold ? (
                                             <div className="flex flex-col items-end">
                                                 <div className="flex items-center gap-2 text-green-400 font-display font-black uppercase text-sm -mb-0.5">
@@ -380,6 +1524,20 @@ function PlayersTab({ players }: any) {
             </div>
         </motion.div>
     );
+}
+
+// Helper function to download CSV
+function downloadCSV(csvContent: string, filename: string) {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
 
 function RulesTab({ rules, settings }: any) {
@@ -479,8 +1637,10 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
     const unsoldPlayers = players?.filter((p: any) => !p.is_sold) || [];
     const { data: recentBids } = useQuery({ queryKey: ["recent_bids"], queryFn: async () => (await supabase.from("bids").select("*, team:teams(*), player:players(*)").order("created_at", { ascending: false }).limit(20)).data });
 
+    const queryClient = useQueryClient();
     const toggleAuctionState = async () => {
         await supabase.from("tournament_settings").update({ is_auction_live: !isLive }).eq("id", settings.id);
+        queryClient.invalidateQueries({ queryKey: ["settings"] });
     };
 
     const putOnBlock = async (player: any) => {
@@ -551,7 +1711,7 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                     </div>
                     <div>
                         <h2 className="text-3xl font-display font-black text-white tracking-tight">LIVE COMMAND CENTER</h2>
-                        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">{isLive ? 'Operational - Broadcast Live' : 'System Standby - Local Only'}</p>
+                        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">${isLive ? 'Operational - Broadcast Live' : 'System Standby - Local Only'}</p>
                     </div>
                 </div>
 
@@ -560,7 +1720,8 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                         onClick={toggleAuctionState}
                         className={`group flex items-center gap-3 px-8 py-4 rounded-2xl font-display font-black tracking-widest text-sm transition-all duration-500 ${isLive
                             ? 'bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20'
-                            : 'bg-primary border border-primary text-white hover:scale-105 active:scale-95 glow-electric'}`}
+                            : 'bg-primary border text-white hover:scale-105 active:scale-95 glow-electric'
+                            }`}
                     >
                         {isLive ? <><PauseCircle className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" /> KILL ENGINE</> : <><PlayCircle className="w-5 h-5 group-hover:rotate-12 transition-transform" /> ACTIVATE ENGINE</>}
                     </button>
@@ -586,20 +1747,27 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                                 >
                                     <div className="relative mb-6">
                                         <div className="absolute inset-0 bg-primary/20 blur-[40px] rounded-full animate-pulse" />
-                                        <img src={auctionState.current_player.image_url} className="w-36 h-36 rounded-full border-4 border-white/5 mb-0 relative z-10 bg-slate-900 object-cover" />
+                                        <img src={auctionState.current_player?.image_url!} alt="Player" className="w-36 h-36 rounded-full border-4 border-white/5 mb-0 relative z-10 bg-slate-900 object-cover" />
                                     </div>
 
-                                    <h4 className="font-display font-black text-4xl mb-4 text-white uppercase tracking-tight">{auctionState.current_player.name}</h4>
+                                    <h4 className="font-display font-black text-4xl mb-4 text-white uppercase tracking-tight">{auctionState.current_player?.name}</h4>
 
                                     <div className="flex gap-3 mb-10">
-                                        <span className="glass px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase border-accent/20 text-accent">{auctionState.current_player.category}</span>
-                                        <span className="glass px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase border-primary/20 text-primary">{auctionState.current_player.playing_role}</span>
+                                        <span className="glass px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase border-accent/20 text-accent">{auctionState.current_player?.category}</span>
+                                        <span className="glass px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase border-primary/20 text-primary">{auctionState.current_player?.playing_role}</span>
                                     </div>
 
                                     <div className="w-full bg-slate-950/60 border border-white/5 p-8 rounded-[2rem] text-center mb-10 glow-gold relative overflow-hidden group/price">
                                         <div className="absolute inset-0 bg-gold/5 opacity-0 group-hover/price:opacity-100 transition-opacity duration-700" />
                                         <p className="text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black mb-2">Highest Authorized Bid</p>
-                                        <p className="font-display text-6xl font-black text-white tracking-tighter mb-2">₹{auctionState.current_bid.toLocaleString()}</p>
+                                        <motion.p
+                                            key={auctionState.current_bid}
+                                            initial={{ scale: 0.9, opacity: 0 }}
+                                            animate={{ scale: 1, opacity: 1 }}
+                                            className="text-6xl font-display font-black text-white tracking-tighter mb-2"
+                                        >
+                                            ₹{auctionState.current_bid.toLocaleString()}
+                                        </motion.p>
                                         <p className="text-primary font-black font-display text-lg tracking-widest uppercase h-8 mt-2 flex items-center justify-center gap-2">
                                             {auctionState.current_bidder?.team_name ? (
                                                 <><Trophy className="w-5 h-5" /> {auctionState.current_bidder.team_name}</>
