@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useRealtimeSubscription } from '@/hooks/useRealtime';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
-import { Shield, Users, Activity, Gavel, Trophy, ArrowRight, Zap, Target, Star } from 'lucide-react';
+import { Shield, Users, Activity, Gavel, Trophy, ArrowRight, Zap, Target, Star, CheckCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 const fetchSettings = async () => {
@@ -47,12 +47,12 @@ export default function LandingPage() {
       opacity: 1,
       transition: { staggerChildren: 0.1, delayChildren: 0.3 }
     }
-  };
+  } as const;
 
   const itemVariants = {
     hidden: { y: 20, opacity: 0 },
     visible: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 100 } }
-  };
+  } as const;
 
   return (
     <div className="min-h-screen relative overflow-x-hidden bg-background mesh-gradient flex flex-col">
