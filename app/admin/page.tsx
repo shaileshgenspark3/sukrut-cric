@@ -1813,6 +1813,36 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
     const unsoldPlayers = players?.filter((p: any) => !p.is_sold) || [];
     const { data: recentBids } = useQuery({ queryKey: ["recent_bids"], queryFn: async () => (await supabase.from("bids").select("*, team:teams(*), player:players(*)").order("created_at", { ascending: false }).limit(20)).data });
 
+    const [playerSearch, setPlayerSearch] = useState("");
+    const [playerCategoryFilter, setPlayerCategoryFilter] = useState("All");
+    const [playerRoleFilter, setPlayerRoleFilter] = useState("All");
+    const [playerGenderFilter, setPlayerGenderFilter] = useState("All");
+
+    // Create filtered unsold players list
+    const filteredUnsoldPlayers = unsoldPlayers.filter((p: any) => {
+        // Search by name
+        if (playerSearch && !p.name.toLowerCase().includes(playerSearch.toLowerCase())) {
+            return false;
+        }
+
+        // Filter by category
+        if (playerCategoryFilter !== "All" && p.category !== playerCategoryFilter) {
+            return false;
+        }
+
+        // Filter by role
+        if (playerRoleFilter !== "All" && p.playing_role !== playerRoleFilter) {
+            return false;
+        }
+
+        // Filter by gender
+        if (playerGenderFilter !== "All" && p.gender !== playerGenderFilter) {
+            return false;
+        }
+
+        return true;
+    });
+
     const queryClient = useQueryClient();
     const toggleAuctionState = async () => {
         await supabase.from("tournament_settings").update({ is_auction_live: !isLive }).eq("id", settings.id);
@@ -1832,40 +1862,48 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
     const markSold = async () => {
         if (!auctionState?.current_player_id || !auctionState?.current_bidder_team_id) return;
 
-        // 1. Mark player sold
-        await supabase.from("players").update({
-            is_sold: true,
-            sold_to_team_id: auctionState.current_bidder_team_id,
-            sold_price: auctionState.current_bid
-        }).eq("id", auctionState.current_player_id);
+        try {
+            // Enforce roster limit before marking player as sold
+            const { enforceMaxPlayersPerTeam } = await import('@/lib/validation/rosterRules');
+            await enforceMaxPlayersPerTeam(auctionState.current_bidder_team_id);
 
-        // 2. Mark winning bid
-        const { data: highestBid } = await supabase.from("bids")
-            .select("id")
-            .eq("player_id", auctionState.current_player_id)
-            .eq("team_id", auctionState.current_bidder_team_id)
-            .order("bid_amount", { ascending: false }).limit(1).single();
+            // 1. Mark player sold
+            await supabase.from("players").update({
+                is_sold: true,
+                sold_to_team_id: auctionState.current_bidder_team_id,
+                sold_price: auctionState.current_bid
+            }).eq("id", auctionState.current_player_id);
 
-        if (highestBid) {
-            await supabase.from("bids").update({ is_winning_bid: true }).eq("id", highestBid.id);
+            // 2. Mark winning bid
+            const { data: highestBid } = await supabase.from("bids")
+                .select("id")
+                .eq("player_id", auctionState.current_player_id)
+                .eq("team_id", auctionState.current_bidder_team_id)
+                .order("bid_amount", { ascending: false }).limit(1).single();
+
+            if (highestBid) {
+                await supabase.from("bids").update({ is_winning_bid: true }).eq("id", highestBid.id);
+            }
+
+            // TRIGGER CONFETTI
+            confetti({
+                particleCount: 150,
+                spread: 70,
+                origin: { y: 0.6 },
+                colors: ['#FFD700', '#FFFFFF', '#3b82f6']
+            });
+
+            // 3. Reset state
+            await supabase.from("auction_state").update({
+                current_player_id: null,
+                current_bid: 0,
+                current_bidder_team_id: null,
+                status: "waiting",
+                updated_at: new Date().toISOString()
+            }).eq("id", auctionState.id);
+        } catch (err: any) {
+            alert(err.message || 'Failed to mark player as sold');
         }
-
-        // TRIGGER CONFETTI
-        confetti({
-            particleCount: 150,
-            spread: 70,
-            origin: { y: 0.6 },
-            colors: ['#FFD700', '#FFFFFF', '#3b82f6']
-        });
-
-        // 3. Reset state
-        await supabase.from("auction_state").update({
-            current_player_id: null,
-            current_bid: 0,
-            current_bidder_team_id: null,
-            status: "waiting",
-            updated_at: new Date().toISOString()
-        }).eq("id", auctionState.id);
     };
 
     const markUnsold = async () => {
@@ -1944,14 +1982,30 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                                         >
                                             ₹{auctionState.current_bid.toLocaleString()}
                                         </motion.p>
-                                        <p className="text-primary font-black font-display text-lg tracking-widest uppercase h-8 mt-2 flex items-center justify-center gap-2">
-                                            {auctionState.current_bidder?.team_name ? (
-                                                <><Trophy className="w-5 h-5" /> {auctionState.current_bidder.team_name}</>
-                                            ) : "Awaiting Entries..."}
-                                        </p>
-                                    </div>
+                                         <p className="text-primary font-black font-display text-lg tracking-widest uppercase h-8 mt-2 flex items-center justify-center gap-2">
+                                             {auctionState.current_bidder?.team_name ? (
+                                                 <><Trophy className="w-5 h-5" /> {auctionState.current_bidder.team_name}</>
+                                             ) : "Awaiting Entries..."}
+                                         </p>
+                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-6 w-full mt-auto">
+                                     {/* Add team roster count for winning team */}
+                                     {auctionState?.current_bidder_team_id && (
+                                         <div className="mt-4 bg-slate-900/40 border border-white/5 rounded-xl p-4">
+                                             <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-2">Winning Team Roster</p>
+                                             <div className="flex items-center gap-2">
+                                                 <Users className="w-4 h-4 text-slate-400" />
+                                                 <span className="text-white font-bold">
+                                                     {(() => {
+                                                         const teamPlayers = players?.filter((p: any) => p.sold_to_team_id === auctionState.current_bidder_team_id && !p.is_captain).length || 0;
+                                                         return `${teamPlayers}/9 players`;
+                                                     })()}
+                                                 </span>
+                                             </div>
+                                         </div>
+                                     )}
+
+                                     <div className="grid grid-cols-2 gap-6 w-full mt-auto">
                                         <button
                                             onClick={markSold}
                                             disabled={!auctionState.current_bidder_team_id}
@@ -2021,11 +2075,91 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                 <div className="w-1/2 glass-card bg-slate-950/40 border border-white/5 rounded-[2.5rem] flex flex-col min-h-0 relative z-10">
                     <div className="p-8 border-b border-white/5 shrink-0 flex justify-between items-center">
                         <h3 className="font-display text-2xl font-black text-white tracking-tight uppercase">Operational Queue</h3>
-                        <span className="glass px-4 py-2 rounded-xl text-[10px] font-black text-slate-400 tracking-widest uppercase">{unsoldPlayers.length} Units</span>
+                        <span className="glass px-4 py-2 rounded-xl text-[10px] font-black text-slate-400 tracking-widest uppercase">{filteredUnsoldPlayers.length} Units</span>
                     </div>
+
+                    {/* Search and Filters */}
+                    <div className="p-6 border-b border-white/5 shrink-0 space-y-4">
+                        <div className="flex gap-4">
+                            <div className="relative flex-1 group">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-hover:text-primary transition-colors" />
+                                <input
+                                    type="text"
+                                    placeholder="Search players by name..."
+                                    value={playerSearch}
+                                    onChange={e => setPlayerSearch(e.target.value)}
+                                    className="w-full bg-slate-900/60 border border-white/5 rounded-2xl pl-12 pr-4 py-4 text-sm focus:border-primary/50 focus:bg-slate-900 outline-none transition-all placeholder:text-slate-600 font-sans"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-3">
+                            <div className="relative group min-w-[140px]">
+                                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 group-hover:text-gold transition-colors" />
+                                <select
+                                    value={playerCategoryFilter}
+                                    onChange={e => setPlayerCategoryFilter(e.target.value)}
+                                    className="appearance-none w-full bg-slate-900/60 border border-white/5 rounded-xl pl-10 pr-8 py-3 text-xs focus:border-gold/30 focus:bg-slate-900 outline-none transition-all font-display font-bold text-slate-300"
+                                >
+                                    <option value="All">All Categories</option>
+                                    <option value="A+">Platinum (A+)</option>
+                                    <option value="A">Gold (A)</option>
+                                    <option value="B">Silver (B)</option>
+                                    <option value="C">Standard (C)</option>
+                                    <option value="F">Female (F)</option>
+                                </select>
+                            </div>
+
+                            <div className="relative group min-w-[140px]">
+                                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 group-hover:text-primary transition-colors" />
+                                <select
+                                    value={playerRoleFilter}
+                                    onChange={e => setPlayerRoleFilter(e.target.value)}
+                                    className="appearance-none w-full bg-slate-900/60 border border-white/5 rounded-xl pl-10 pr-8 py-3 text-xs focus:border-primary/30 focus:bg-slate-900 outline-none transition-all font-display font-bold text-slate-300"
+                                >
+                                    <option value="All">All Roles</option>
+                                    <option value="Batsman">Batsman</option>
+                                    <option value="Bowler">Bowler</option>
+                                    <option value="All-rounder">All-rounder</option>
+                                    <option value="Wicket-keeper">Wicket-keeper</option>
+                                </select>
+                            </div>
+
+                            <div className="relative group min-w-[140px]">
+                                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 group-hover:text-accent transition-colors" />
+                                <select
+                                    value={playerGenderFilter}
+                                    onChange={e => setPlayerGenderFilter(e.target.value)}
+                                    className="appearance-none w-full bg-slate-900/60 border border-white/5 rounded-xl pl-10 pr-8 py-3 text-xs focus:border-accent/30 focus:bg-slate-900 outline-none transition-all font-display font-bold text-slate-300"
+                                >
+                                    <option value="All">All Genders</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                </select>
+                            </div>
+
+                            <button
+                                onClick={() => {
+                                    setPlayerSearch("");
+                                    setPlayerCategoryFilter("All");
+                                    setPlayerRoleFilter("All");
+                                    setPlayerGenderFilter("All");
+                                }}
+                                className="px-4 py-3 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white border border-white/5 hover:border-white/10 transition-colors"
+                            >
+                                CLEAR FILTERS
+                            </button>
+                        </div>
+                    </div>
+
                     <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
                         <div className="space-y-3">
-                            {unsoldPlayers.map((p: any) => (
+                            {filteredUnsoldPlayers.length === 0 && (
+                                <div className="text-center py-10 text-slate-700">
+                                    <p className="font-display text-sm uppercase tracking-[0.2em] opacity-40">No players match filters</p>
+                                </div>
+                            )}
+                            {filteredUnsoldPlayers.length > 0 && filteredUnsoldPlayers.map((p: any) => (
                                 <div key={p.id} className="group bg-slate-950/40 border border-white/5 p-4 rounded-3xl flex items-center justify-between hover:border-primary/40 hover:bg-slate-900 transition-all duration-300">
                                     <div className="flex items-center gap-4">
                                         <div className="relative">
