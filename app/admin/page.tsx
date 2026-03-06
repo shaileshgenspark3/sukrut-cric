@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRealtimeSubscription } from '@/hooks/useRealtime';
 import { assignCaptain, removeCaptain } from '@/lib/actions/captains';
+import { isPlayerEligibleForAuction } from "@/lib/validation/teamComposition";
 import { manualPurseDeduction, updateBasePrices } from '@/lib/actions/rules';
 import {
     Loader2, LogOut, LayoutDashboard, Users, Gavel,
@@ -2085,6 +2086,8 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
     const [playerSearch, setPlayerSearch] = useState("");
     const [playerCategoryFilter, setPlayerCategoryFilter] = useState("All");
     const [playerRoleFilter, setPlayerRoleFilter] = useState("All");
+
+    const [eligiblePlayers, setEligiblePlayers] = useState<any[]>([]);
     const [playerGenderFilter, setPlayerGenderFilter] = useState("All");
 
     // Create filtered unsold players list
@@ -2109,6 +2112,24 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
             return false;
         }
 
+
+    // Filter eligible players for auction deployment
+    useEffect(() => {
+        const filterEligiblePlayers = async () => {
+            if (!players) return;
+
+            const eligible = await Promise.all(
+                players.map(async (player: any) => {
+                    const isEligible = await isPlayerEligibleForAuction(player.id);
+                    return { ...player, isEligible };
+                })
+            );
+
+            setEligiblePlayers(eligible.filter((p: any) => p.isEligible));
+        };
+
+        filterEligiblePlayers();
+    }, [players]);
         return true;
     });
 
@@ -2423,12 +2444,12 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
 
                     <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
                         <div className="space-y-3">
-                            {filteredUnsoldPlayers.length === 0 && (
+                            {eligiblePlayers.length === 0 && (
                                 <div className="text-center py-10 text-slate-700">
                                     <p className="font-display text-sm uppercase tracking-[0.2em] opacity-40">No players match filters</p>
                                 </div>
                             )}
-                            {filteredUnsoldPlayers.length > 0 && filteredUnsoldPlayers.map((p: any) => (
+                            {eligiblePlayers.length > 0 filteredUnsoldPlayers.length > 0 && filteredUnsoldPlayers.mapfilteredUnsoldPlayers.length > 0 && filteredUnsoldPlayers.map eligiblePlayers.map((p: any) => (
                                 <div key={p.id} className="group bg-slate-950/40 border border-white/5 p-4 rounded-3xl flex items-center justify-between hover:border-primary/40 hover:bg-slate-900 transition-all duration-300">
                                     <div className="flex items-center gap-4">
                                         <div className="relative">

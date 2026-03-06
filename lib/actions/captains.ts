@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
+import { validateTeamComposition, canAddPlayerToTeam } from "@/lib/validation/teamComposition";
 
 export async function assignCaptain(teamId: string, playerId: string) {
   // Get player info
@@ -29,6 +30,17 @@ export async function assignCaptain(teamId: string, playerId: string) {
   // Calculate captain deduction based on category
   const deduction = player.category === 'A+' ? 500000 :
                    player.category === 'A' ? 200000 : 0;
+
+  // Check if adding this captain would violate roster limits
+  const canAdd = await canAddPlayerToTeam(teamId, {
+    gender: player.gender,
+    category: player.category
+  });
+
+  if (!canAdd) {
+    const validation = await validateTeamComposition(teamId);
+    throw new Error(`Cannot add captain: ${validation.reason}`);
+  }
 
   // Start transaction-like sequence
   // 1. Update player to mark as captain and link to team
