@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRealtimeSubscription } from '@/hooks/useRealtime';
+import { useTimer } from '@/hooks/useTimer';
+import { formatMinutesSeconds, formatHoursMinutesSeconds } from '@/lib/services/timer/timerService';
+import { startTimer, pauseTimer, resumeTimer, updateTimerSettings } from '@/lib/actions/timer';
 import { assignCaptain, removeCaptain } from '@/lib/actions/captains';
 import { isPlayerEligibleForAuction } from "@/lib/validation/teamComposition";
 import { manualPurseDeduction, updateBasePrices } from '@/lib/actions/rules';
@@ -1289,12 +1292,12 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                                      </tr>
                                  ))}
                              </tbody>
-                          </table>
+                           </table>
                       </div>
-                  </div>
-              </div>
-          </motion.div>
-       );
+                </div>
+            </div>
+        </motion.div>
+    );
 }
 
 function StatCard({ title, value, icon: Icon, color, accent, isLive }: any) {
@@ -2083,6 +2086,26 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
     const unsoldPlayers = players?.filter((p: any) => !p.is_sold) || [];
     const { data: recentBids } = useQuery({ queryKey: ["recent_bids"], queryFn: async () => (await supabase.from("bids").select("*, team:teams(*), player:players(*)").order("created_at", { ascending: false }).limit(20)).data });
 
+    // Timer management
+    const { totalSeconds, minutes, seconds, isRunning, isPaused, pause, resume, start, isExpired } = useTimer();
+
+    // Timer settings state
+    const [showTimerSettings, setShowTimerSettings] = useState(false);
+    const [firstBidTimer, setFirstBidTimer] = useState(30);
+    const [subsequentBidTimer, setSubsequentBidTimer] = useState(15);
+
+    // Listen for timer expiry
+    useEffect(() => {
+        const handleExpiry = (e: Event) => {
+            const customEvent = e as CustomEvent;
+            console.log("Timer expired:", customEvent.detail);
+            // Handle expiry logic (will be enhanced in next plan)
+        };
+
+        window.addEventListener("timer-expiry", handleExpiry);
+        return () => window.removeEventListener("timer-expiry", handleExpiry);
+    }, []);
+
     const [playerSearch, setPlayerSearch] = useState("");
     const [playerCategoryFilter, setPlayerCategoryFilter] = useState("All");
     const [playerRoleFilter, setPlayerRoleFilter] = useState("All");
@@ -2147,6 +2170,9 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
             status: "bidding",
             updated_at: new Date().toISOString()
         }).eq("id", auctionState.id);
+
+        // Start the timer
+        await start(firstBidTimer);
     };
 
     const markSold = async () => {
@@ -2238,7 +2264,73 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                 <div className="w-1/2 flex flex-col gap-8">
                     <div className="glass-card bg-slate-950/40 border border-white/5 rounded-[2.5rem] p-8 flex flex-col relative overflow-hidden group">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-[100px] pointer-events-none" />
-                        <h3 className="text-slate-500 uppercase text-[10px] font-black tracking-[0.4em] mb-8">Current Active Block</h3>
+                        
+                        {/* Timer Display Section */}
+                        <div className="flex justify-between items-start mb-6">
+                            <h3 className="text-slate-500 uppercase text-[10px] font-black tracking-[0.4em]">Current Active Block</h3>
+                            
+                            {/* Timer Controls */}
+                            <div className="flex items-center gap-3">
+                                {/* Timer Settings Button */}
+                                <button
+                                    onClick={() => setShowTimerSettings(true)}
+                                    className="p-2 rounded-xl bg-slate-900/60 border border-white/10 text-slate-400 hover:text-primary hover:border-primary/30 transition-all"
+                                    title="Timer Settings"
+                                >
+                                    <Settings className="w-4 h-4" />
+                                </button>
+                                
+                                {/* Pause/Resume Button */}
+                                {auctionState?.current_player && (
+                                    <button
+                                        onClick={() => isPaused ? resume() : pause()}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-xl font-display font-black text-xs uppercase tracking-widest transition-all ${
+                                            isPaused 
+                                                ? 'bg-green-500/10 border border-green-500/30 text-green-500 hover:bg-green-500/20' 
+                                                : 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/20'
+                                        }`}
+                                    >
+                                        {isPaused ? (
+                                            <><PlayCircle className="w-4 h-4" /> Resume</>
+                                        ) : (
+                                            <><PauseCircle className="w-4 h-4" /> Pause</>
+                                        )}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Timer Countdown Display */}
+                        {auctionState?.current_player && (
+                            <div className={`mb-8 p-6 rounded-[2rem] text-center relative overflow-hidden ${
+                                isPaused 
+                                    ? 'bg-slate-900/60 border-2 border-yellow-500/30' 
+                                    : totalSeconds <= 10 
+                                        ? 'bg-destructive/10 border-2 border-destructive/30 animate-pulse' 
+                                        : 'bg-slate-900/40 border border-white/5'
+                            }`}>
+                                {isPaused && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-950/50 z-10">
+                                        <span className="bg-yellow-500 text-black px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest animate-pulse">
+                                            PAUSED
+                                        </span>
+                                    </div>
+                                )}
+                                <p className="text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black mb-2">
+                                    {isPaused ? 'Timer Frozen At' : 'Time Remaining'}
+                                </p>
+                                <div className={`font-display font-black tracking-tighter ${
+                                    totalSeconds <= 10 ? 'text-destructive text-7xl' : 'text-white text-7xl'
+                                }`}>
+                                    {formatMinutesSeconds(totalSeconds)}
+                                </div>
+                                {totalSeconds === 0 && (
+                                    <p className="text-destructive font-black text-sm uppercase tracking-widest mt-2">
+                                        Timer Expired!
+                                    </p>
+                                )}
+                            </div>
+                        )}
 
                         <AnimatePresence mode="wait">
                             {auctionState?.current_player ? (
@@ -2449,7 +2541,7 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                                     <p className="font-display text-sm uppercase tracking-[0.2em] opacity-40">No players match filters</p>
                                 </div>
                             )}
-                            {eligiblePlayers.length > 0 filteredUnsoldPlayers.length > 0 && filteredUnsoldPlayers.mapfilteredUnsoldPlayers.length > 0 && filteredUnsoldPlayers.map eligiblePlayers.map((p: any) => (
+                            {eligiblePlayers.length > 0 && filteredUnsoldPlayers.length > 0 && filteredUnsoldPlayers.map((p: any) => (
                                 <div key={p.id} className="group bg-slate-950/40 border border-white/5 p-4 rounded-3xl flex items-center justify-between hover:border-primary/40 hover:bg-slate-900 transition-all duration-300">
                                     <div className="flex items-center gap-4">
                                         <div className="relative">
@@ -2483,6 +2575,79 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                 </div>
 
             </div>
+
+            {/* Timer Settings Modal */}
+            {showTimerSettings && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="glass-card bg-slate-900 border border-white/10 rounded-[2rem] p-8 max-w-md w-full mx-4 shadow-2xl"
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="font-display text-2xl font-black text-white tracking-tight">Timer Settings</h3>
+                            <button onClick={() => setShowTimerSettings(false)} className="text-slate-400 hover:text-white">
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-6">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">
+                                    First Bid Timer (seconds)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={firstBidTimer}
+                                    onChange={(e) => setFirstBidTimer(parseInt(e.target.value) || 30)}
+                                    min={5}
+                                    max={300}
+                                    className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                                />
+                                <p className="text-[10px] text-slate-500 ml-4">Time allowed for first bid (5-300 seconds)</p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">
+                                    Subsequent Bid Timer (seconds)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={subsequentBidTimer}
+                                    onChange={(e) => setSubsequentBidTimer(parseInt(e.target.value) || 15)}
+                                    min={5}
+                                    max={300}
+                                    className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                                />
+                                <p className="text-[10px] text-slate-500 ml-4">Time allowed after each new bid (5-300 seconds)</p>
+                            </div>
+
+                            <div className="flex gap-4 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowTimerSettings(false)}
+                                    className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            await updateTimerSettings(firstBidTimer, subsequentBidTimer);
+                                            setShowTimerSettings(false);
+                                        } catch (error: any) {
+                                            alert(error.message || 'Failed to update timer settings');
+                                        }
+                                    }}
+                                    className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)]"
+                                >
+                                    Save Settings
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
         </div>
     );
 }
