@@ -9,18 +9,27 @@ import { useTimer } from '@/hooks/useTimer';
 import { formatMinutesSeconds, formatHoursMinutesSeconds } from '@/lib/services/timer/timerService';
 import { startTimer, pauseTimer, resumeTimer, updateTimerSettings } from '@/lib/actions/timer';
 import { assignCaptain, removeCaptain } from '@/lib/actions/captains';
+import { deployPlayer, markPlayerUnsold, finalizeSale, reAuctionPlayer } from '@/lib/actions/auction';
 import { isPlayerEligibleForAuction } from "@/lib/validation/teamComposition";
 import { manualPurseDeduction, updateBasePrices } from '@/lib/actions/rules';
+import { banTeamFromBidding, unbanTeam, getBannedTeams } from '@/lib/actions/admin';
+import { createLogEntry } from '@/lib/actions/logging';
+import { AuctionLogs } from '@/components/admin/AuctionLogs';
+import { ManualSaleModal } from '@/components/admin/ManualSaleModal';
 import {
     Loader2, LogOut, LayoutDashboard, Users, Gavel,
     Settings, ListPlus, PlayCircle, PauseCircle,
     CheckCircle, XCircle, Activity, Shield,
     Trophy, Search, Filter, ChevronRight,
-    Download, Upload, Plus, Trash2, Edit, X, Info
+    Download, Upload, Plus, Trash2, Edit, X, Info,
+    ArrowUpRight, FileText, FilePlus, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import Papa from 'papaparse';
+import { PlayerCard } from '@/components/admin/PlayerCard';
+import { BidHistory } from '@/components/admin/BidHistory';
+import { useBids } from '@/hooks/useBids';
 
 export default function AdminDashboard() {
     const router = useRouter();
@@ -33,6 +42,7 @@ export default function AdminDashboard() {
     const [showAddCaptain, setShowAddCaptain] = useState(false);
     const [showEditCaptain, setShowEditCaptain] = useState(false);
     const [showAddPlayer, setShowAddPlayer] = useState(false);
+    const [showManualSale, setShowManualSale] = useState(false);
     const [showEditPlayer, setShowEditPlayer] = useState(false);
     const [selectedCaptain, setSelectedCaptain] = useState<any>(null);
     const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
@@ -115,7 +125,8 @@ export default function AdminDashboard() {
         { id: "players", label: "Players", icon: Users },
         { id: "captain", label: "Captain Selection", icon: Trophy },
         { id: "rules", label: "Auction Rules", icon: Settings },
-        { id: "live", label: "Live Controller", icon: Gavel, requiresCore: true }
+        { id: "live", label: "Live Controller", icon: Gavel, requiresCore: true },
+        { id: "logs", label: "Log Entries", icon: FileText }
     ];
 
     // Modal props for child components
@@ -126,7 +137,8 @@ export default function AdminDashboard() {
         setShowEditPlayer,
         setSelectedCaptain,
         setSelectedPlayer,
-        setDeleteConfirm
+        setDeleteConfirm,
+        setShowManualSale
     };
 
     if (!userId) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
@@ -197,7 +209,8 @@ export default function AdminDashboard() {
                 {activeTab === "players" && <PlayersTab players={players} {...modalProps} />}
                 {activeTab === "captain" && <CaptainSelectionTab teams={teams} players={players} />}
                 {activeTab === "rules" && <RulesTab rules={rules} settings={settings} />}
-                {activeTab === "live" && <LiveControllerTab auctionState={auctionState} settings={settings} players={players} />}
+                {activeTab === "live" && <LiveControllerTab auctionState={auctionState} settings={settings} players={players} teams={teams} />}
+                {activeTab === "logs" && <AuctionLogs />}
             </main>
 
             {/* Modals */}
@@ -219,6 +232,11 @@ export default function AdminDashboard() {
                     queryClient.invalidateQueries({ queryKey: ['players'] });
                     setSelectedPlayer(null);
                 }}
+            />
+
+            <ManualSaleModal
+                show={showManualSale}
+                onClose={() => setShowManualSale(false)}
             />
 
             <ConfirmDeleteModal
@@ -1204,35 +1222,21 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
             <div className="glass-card rounded-[2.5rem] p-8 border-white/5 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-[100px] pointer-events-none" />
                 <div className="relative z-10">
-                    <div className="flex justify-between items-center mb-8">
-                        <div>
-                            <h3 className="font-display text-2xl font-black text-white mb-1 uppercase tracking-tight">Captain Access Matrix</h3>
-                            <p className="text-slate-500 text-sm font-sans">Active authentication tokens and credentials</p>
-                        </div>
-                        <div className="flex gap-2">
-                            <input
-                                type="file"
-                                ref={captainsFileInputRef}
-                                onChange={importCaptainsCSV}
-                                accept=".csv"
-                                className="hidden"
-                            />
-                            <button
-                                onClick={() => captainsFileInputRef.current?.click()}
-                                className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-colors flex items-center gap-2"
-                            >
-                                <Upload className="w-4 h-4" />
-                                IMPORT CSV
-                            </button>
-                            <button
-                                onClick={exportCaptainsCSV}
-                                className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-colors flex items-center gap-2"
-                            >
-                                <Download className="w-4 h-4" />
-                                EXPORT CSV
-                            </button>
-                        </div>
-                    </div>
+                     <div className="flex justify-between items-center mb-8">
+                         <div>
+                             <h3 className="font-display text-2xl font-black text-white mb-1 uppercase tracking-tight">Captain Access Matrix</h3>
+                             <p className="text-slate-500 text-sm font-sans">Active authentication tokens and credentials</p>
+                         </div>
+                         <div className="flex gap-2">
+                             <button
+                                 onClick={() => modalProps.setShowManualSale?.(true)}
+                                 className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white hover:bg-white/5 transition-colors flex items-center gap-2"
+                             >
+                                 <FilePlus className="w-4 h-4" />
+                                 MANUAL SALE
+                             </button>
+                         </div>
+                     </div>
 
                     <div className="overflow-x-auto scrollbar-hide max-h-[60vh]">
                         <table className="w-full text-left text-sm whitespace-nowrap">
@@ -1665,13 +1669,13 @@ function PlayersTab({ players, ...modalProps }: any) {
                                             {p.gender}
                                         </span>
                                     </td>
-                                    <td className="px-4 py-6 font-display font-black text-white text-base">₹{p.base_price.toLocaleString()}</td>
+                                    <td className="px-4 py-6 font-display font-black text-white text-base">₹{p.base_price?.toLocaleString() || '0'}</td>
                                     <td className="px-4 py-6 text-right">
                                         {p.is_sold ? (
                                             <div className="flex flex-col items-end">
                                                 <div className="flex items-center gap-2 text-green-400 font-display font-black uppercase text-sm -mb-0.5">
                                                     <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                                                    SOLD ₹{p.sold_price.toLocaleString()}
+                                                    SOLD ₹{p.sold_price?.toLocaleString() || '0'}
                                                 </div>
                                                 <span className="text-[10px] text-slate-500 font-black tracking-widest uppercase">{p.team?.team_name}</span>
                                             </div>
@@ -1928,7 +1932,7 @@ function RulesTab({ rules, settings }: any) {
                                     <p className="font-display font-black text-white tracking-widest text-base uppercase">{r.team?.team_name}</p>
                                 </td>
                                 <td className="px-4 py-6 text-slate-400 font-sans font-medium">{r.team?.captain_name}</td>
-                                <td className="px-4 py-6 font-display font-black text-slate-300">₹{r.starting_purse.toLocaleString()}</td>
+                                <td className="px-4 py-6 font-display font-black text-slate-300">₹{r.starting_purse?.toLocaleString() || '0'}</td>
                                 <td className="px-4 py-6">
                                     <div className="relative w-40">
                                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-destructive/50 font-bold text-xs">-₹</span>
@@ -1942,7 +1946,7 @@ function RulesTab({ rules, settings }: any) {
                                 </td>
                                 <td className="px-8 py-6 text-right">
                                     <div className="text-xl font-display font-black text-accent tracking-tighter glow-gold">
-                                        ₹{r.current_purse.toLocaleString()}
+                                        ₹{r.current_purse?.toLocaleString() || '0'}
                                     </div>
                                 </td>
                             </tr>
@@ -2081,7 +2085,7 @@ function CaptainSelectionTab({ teams, players }: any) {
     );
 }
 
-function LiveControllerTab({ auctionState, settings, players }: any) {
+function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const isLive = settings?.is_auction_live;
     const unsoldPlayers = players?.filter((p: any) => !p.is_sold) || [];
     const { data: recentBids } = useQuery({ queryKey: ["recent_bids"], queryFn: async () => (await supabase.from("bids").select("*, team:teams(*), player:players(*)").order("created_at", { ascending: false }).limit(20)).data });
@@ -2089,22 +2093,117 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
     // Timer management
     const { totalSeconds, minutes, seconds, isRunning, isPaused, pause, resume, start, isExpired } = useTimer();
 
+    // Bids for current player
+    const { bids, topBids, historyBids } = useBids(auctionState?.current_player?.id || null);
+
+    // Import eligibility functions
+    const [teamEligibility, setTeamEligibility] = useState<any[]>([]);
+    const [bannedTeams, setBannedTeams] = useState<any[]>([]);
+
+    useEffect(() => {
+        const fetchEligibility = async () => {
+            if (!auctionState?.current_player?.id || !teams) {
+                setTeamEligibility([]);
+                setBannedTeams([]);
+                return;
+            }
+
+            try {
+                const { getEligibleTeams } = await import('@/lib/validation/bidValidation');
+                const eligibility = await getEligibleTeams(auctionState.current_player.id);
+                setTeamEligibility(eligibility);
+
+                const bans = await getBannedTeams(auctionState.current_player.id);
+                setBannedTeams(bans);
+            } catch (error) {
+                console.error("Failed to fetch team eligibility:", error);
+                setTeamEligibility([]);
+                setBannedTeams([]);
+            }
+        };
+
+        fetchEligibility();
+    }, [auctionState?.current_player?.id, teams, auctionState?.current_bid]);
+
+    const isTeamBanned = (teamId: string) => {
+        return bannedTeams.some((ban: any) => ban.teamId === teamId);
+    };
+
+    const handleBanTeam = async (teamId: string, teamName: string) => {
+        if (!auctionState?.current_player?.id) return;
+        
+        const confirmed = window.confirm(`Ban ${teamName} from bidding on ${auctionState.current_player.name}?`);
+        if (!confirmed) return;
+
+        try {
+            await banTeamFromBidding(teamId, auctionState.current_player.id);
+            const updatedBans = await getBannedTeams(auctionState.current_player.id);
+            setBannedTeams(updatedBans);
+        } catch (error: any) {
+            alert(error.message || 'Failed to ban team');
+        }
+    };
+
+    const handleUnbanTeam = async (teamId: string) => {
+        if (!auctionState?.current_player?.id) return;
+
+        try {
+            await unbanTeam(teamId, auctionState.current_player.id);
+            const updatedBans = await getBannedTeams(auctionState.current_player.id);
+            setBannedTeams(updatedBans);
+        } catch (error: any) {
+            alert(error.message || 'Failed to unban team');
+        }
+    };
+
     // Timer settings state
     const [showTimerSettings, setShowTimerSettings] = useState(false);
     const [firstBidTimer, setFirstBidTimer] = useState(30);
     const [subsequentBidTimer, setSubsequentBidTimer] = useState(15);
 
-    // Listen for timer expiry
+    // Expiry modal state - shows when timer expires
+    const [showExpiryModal, setShowExpiryModal] = useState(false);
+    const [expiryModalType, setExpiryModalType] = useState<'no_bids' | 'has_bids'>('no_bids');
+    
+    // Deploy confirmation modal
+    const [showDeployConfirm, setShowDeployConfirm] = useState(false);
+    const [playerToDeploy, setPlayerToDeploy] = useState<any>(null);
+    
+    // Modify bid modal
+    const [showModifyBid, setShowModifyBid] = useState(false);
+    const [modifyBidAmount, setModifyBidAmount] = useState<number>(0);
+    const [modifyTeamId, setModifyTeamId] = useState<string>('');
+
+    // Track previous status for detecting transitions
+    const [previousStatus, setPreviousStatus] = useState<string>('');
+
+    // Listen for timer expiry event
     useEffect(() => {
         const handleExpiry = (e: Event) => {
             const customEvent = e as CustomEvent;
             console.log("Timer expired:", customEvent.detail);
-            // Handle expiry logic (will be enhanced in next plan)
+            // Handle expiry logic - show modal
+            const hasBids = (auctionState?.bid_count || 0) > 0;
+            setExpiryModalType(hasBids ? 'has_bids' : 'no_bids');
+            setShowExpiryModal(true);
         };
 
         window.addEventListener("timer-expiry", handleExpiry);
         return () => window.removeEventListener("timer-expiry", handleExpiry);
-    }, []);
+    }, [auctionState?.bid_count]);
+
+    // Timer expiry detection - monitor totalSeconds (without queryClient)
+    useEffect(() => {
+        // Check if timer just expired (went from running to 0)
+        if (totalSeconds === 0 && auctionState?.current_player_id && 
+            (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid')) {
+            
+            // Determine modal type based on bid count
+            const hasBids = (auctionState?.bid_count || 0) > 0;
+            setExpiryModalType(hasBids ? 'has_bids' : 'no_bids');
+            setShowExpiryModal(true);
+        }
+    }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.bid_count]);
 
     const [playerSearch, setPlayerSearch] = useState("");
     const [playerCategoryFilter, setPlayerCategoryFilter] = useState("All");
@@ -2157,22 +2256,122 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
     });
 
     const queryClient = useQueryClient();
+    
+    // Track status changes for sold/unsold feedback
+    useEffect(() => {
+        if (previousStatus && previousStatus !== auctionState?.status) {
+            // Status changed - might be a sale completion
+            if (previousStatus === 'bidding' && auctionState?.status === 'idle') {
+                // Auction completed - sold or unsold
+                queryClient.invalidateQueries({ queryKey: ['auction_state'] });
+            }
+        }
+        setPreviousStatus(auctionState?.status || '');
+    }, [auctionState?.status, previousStatus, queryClient]);
+
     const toggleAuctionState = async () => {
         await supabase.from("tournament_settings").update({ is_auction_live: !isLive }).eq("id", settings.id);
         queryClient.invalidateQueries({ queryKey: ["settings"] });
     };
 
-    const putOnBlock = async (player: any) => {
-        await supabase.from("auction_state").update({
-            current_player_id: player.id,
-            current_bid: player.base_price,
-            current_bidder_team_id: null,
-            status: "bidding",
-            updated_at: new Date().toISOString()
-        }).eq("id", auctionState.id);
+    // Deploy player with confirmation
+    const handleDeployPlayer = async (player: any) => {
+        setPlayerToDeploy(player);
+        setShowDeployConfirm(true);
+    };
 
-        // Start the timer
-        await start(firstBidTimer);
+    const confirmDeploy = async () => {
+        if (!playerToDeploy) return;
+        
+        try {
+            await deployPlayer(playerToDeploy.id);
+            // Start the timer after successful deployment
+            await start(firstBidTimer);
+            setShowDeployConfirm(false);
+            setPlayerToDeploy(null);
+        } catch (error: any) {
+            alert(error.message || 'Failed to deploy player');
+        }
+    };
+
+    // Handle timer expiry
+    const handleExpiryNoBids = async () => {
+        // User chose to keep unsold
+        if (auctionState?.current_player_id) {
+            try {
+                await markPlayerUnsold(auctionState.current_player_id);
+            } catch (error: any) {
+                alert(error.message || 'Failed to mark player as unsold');
+            }
+        }
+        setShowExpiryModal(false);
+    };
+
+    const handleExpiryReauction = async () => {
+        // User chose to re-auction - restart timer
+        try {
+            await start(firstBidTimer);
+            setShowExpiryModal(false);
+        } catch (error: any) {
+            alert(error.message || 'Failed to re-auction player');
+        }
+    };
+
+    const handleExpiryConfirmSale = async () => {
+        // User confirmed sale at current bid
+        if (!auctionState?.current_player_id || !auctionState?.current_bidder_team_id) {
+            alert('No winning bidder');
+            return;
+        }
+
+        try {
+            await finalizeSale(
+                auctionState.current_player_id,
+                auctionState.current_bidder_team_id,
+                auctionState.current_bid_amount || auctionState.current_base_price
+            );
+            // Trigger confetti
+            confetti({
+                particleCount: 150,
+                spread: 70,
+                origin: { y: 0.6 },
+                colors: ['#FFD700', '#FFFFFF', '#3b82f6']
+            });
+            setShowExpiryModal(false);
+        } catch (error: any) {
+            alert(error.message || 'Failed to finalize sale');
+        }
+    };
+
+    const handleExpiryModifyBid = () => {
+        // Open modify bid modal
+        setModifyBidAmount(auctionState?.current_bid_amount || auctionState?.current_base_price || 0);
+        setModifyTeamId(auctionState?.current_bidder_team_id || '');
+        setShowExpiryModal(false);
+        setShowModifyBid(true);
+    };
+
+    const confirmModifyBid = async () => {
+        if (!auctionState?.current_player_id) return;
+
+        try {
+            const teamId = modifyTeamId || auctionState.current_bidder_team_id;
+            const amount = modifyBidAmount;
+            
+            await finalizeSale(auctionState.current_player_id, teamId, amount);
+            
+            // Trigger confetti
+            confetti({
+                particleCount: 150,
+                spread: 70,
+                origin: { y: 0.6 },
+                colors: ['#FFD700', '#FFFFFF', '#3b82f6']
+            });
+            
+            setShowModifyBid(false);
+        } catch (error: any) {
+            alert(error.message || 'Failed to finalize sale');
+        }
     };
 
     const markSold = async () => {
@@ -2183,53 +2382,32 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
             const { enforceMaxPlayersPerTeam } = await import('@/lib/validation/rosterRules');
             await enforceMaxPlayersPerTeam(auctionState.current_bidder_team_id);
 
-            // 1. Mark player sold
-            await supabase.from("players").update({
-                is_sold: true,
-                sold_to_team_id: auctionState.current_bidder_team_id,
-                sold_price: auctionState.current_bid
-            }).eq("id", auctionState.current_player_id);
-
-            // 2. Mark winning bid
-            const { data: highestBid } = await supabase.from("bids")
-                .select("id")
-                .eq("player_id", auctionState.current_player_id)
-                .eq("team_id", auctionState.current_bidder_team_id)
-                .order("bid_amount", { ascending: false }).limit(1).single();
-
-            if (highestBid) {
-                await supabase.from("bids").update({ is_winning_bid: true }).eq("id", highestBid.id);
-            }
-
-            // TRIGGER CONFETTI
+            await finalizeSale(
+                auctionState.current_player_id,
+                auctionState.current_bidder_team_id,
+                auctionState.current_bid_amount || auctionState.current_base_price
+            );
+            
+            // Trigger confetti
             confetti({
                 particleCount: 150,
                 spread: 70,
                 origin: { y: 0.6 },
                 colors: ['#FFD700', '#FFFFFF', '#3b82f6']
             });
-
-            // 3. Reset state
-            await supabase.from("auction_state").update({
-                current_player_id: null,
-                current_bid: 0,
-                current_bidder_team_id: null,
-                status: "waiting",
-                updated_at: new Date().toISOString()
-            }).eq("id", auctionState.id);
         } catch (err: any) {
             alert(err.message || 'Failed to mark player as sold');
         }
     };
 
     const markUnsold = async () => {
-        await supabase.from("auction_state").update({
-            current_player_id: null,
-            current_bid: 0,
-            current_bidder_team_id: null,
-            status: "waiting",
-            updated_at: new Date().toISOString()
-        }).eq("id", auctionState.id);
+        if (!auctionState?.current_player_id) return;
+        
+        try {
+            await markPlayerUnsold(auctionState.current_player_id);
+        } catch (err: any) {
+            alert(err.message || 'Failed to mark player as unsold');
+        }
     };
 
     return (
@@ -2339,55 +2517,54 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                                     initial={{ opacity: 0, scale: 0.95 }}
                                     animate={{ opacity: 1, scale: 1 }}
                                     exit={{ opacity: 0, y: -20 }}
-                                    className="flex flex-col items-center flex-1 justify-center"
+                                    className="flex flex-col w-full"
                                 >
-                                    <div className="relative mb-6">
-                                        <div className="absolute inset-0 bg-primary/20 blur-[40px] rounded-full animate-pulse" />
-                                        <img src={auctionState.current_player?.image_url!} alt="Player" className="w-36 h-36 rounded-full border-4 border-white/5 mb-0 relative z-10 bg-slate-900 object-cover" />
+                                    {/* Auction Status Banner */}
+                                    <div className="mb-6 flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <span className={`w-3 h-3 rounded-full ${auctionState.status === 'bidding' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
+                                            <span className="text-white font-bold text-sm uppercase tracking-wider">
+                                                {auctionState.status === 'waiting_for_first_bid' ? 'Waiting for First Bid' : 
+                                                 auctionState.status === 'bidding' ? 'Bidding in Progress' : 
+                                                 auctionState.status === 'idle' ? 'Idle' : auctionState.status}
+                                            </span>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-slate-500 text-[10px] uppercase tracking-wider">Base Price</p>
+                                            <p className="text-white font-bold">₹{auctionState.current_base_price?.toLocaleString()}</p>
+                                        </div>
                                     </div>
 
-                                    <h4 className="font-display font-black text-4xl mb-4 text-white uppercase tracking-tight">{auctionState.current_player?.name}</h4>
-
-                                    <div className="flex gap-3 mb-10">
-                                        <span className="glass px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase border-accent/20 text-accent">{auctionState.current_player?.category}</span>
-                                        <span className="glass px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase border-primary/20 text-primary">{auctionState.current_player?.playing_role}</span>
+                                    {/* Player Card - Full Details */}
+                                    <div className="mb-6">
+                                        <PlayerCard 
+                                            player={auctionState.current_player}
+                                            basePrice={auctionState.current_base_price || 0}
+                                            showBidInfo={true}
+                                            currentBid={auctionState.current_bid}
+                                            bidCount={auctionState.bid_count || 0}
+                                            topBidder={auctionState.current_bidder}
+                                        />
                                     </div>
 
-                                    <div className="w-full bg-slate-950/60 border border-white/5 p-8 rounded-[2rem] text-center mb-10 glow-gold relative overflow-hidden group/price">
-                                        <div className="absolute inset-0 bg-gold/5 opacity-0 group-hover/price:opacity-100 transition-opacity duration-700" />
-                                        <p className="text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black mb-2">Highest Authorized Bid</p>
-                                        <motion.p
-                                            key={auctionState.current_bid}
-                                            initial={{ scale: 0.9, opacity: 0 }}
-                                            animate={{ scale: 1, opacity: 1 }}
-                                            className="text-6xl font-display font-black text-white tracking-tighter mb-2"
-                                        >
-                                            ₹{auctionState.current_bid.toLocaleString()}
-                                        </motion.p>
-                                         <p className="text-primary font-black font-display text-lg tracking-widest uppercase h-8 mt-2 flex items-center justify-center gap-2">
-                                             {auctionState.current_bidder?.team_name ? (
-                                                 <><Trophy className="w-5 h-5" /> {auctionState.current_bidder.team_name}</>
-                                             ) : "Awaiting Entries..."}
-                                         </p>
-                                     </div>
+                                    {/* Bid Increment Info */}
+                                    <div className="bg-slate-900/60 border border-primary/20 rounded-xl p-4 mb-6">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <p className="text-slate-500 text-[10px] uppercase tracking-wider">Next Valid Bid</p>
+                                                <p className="text-primary font-bold text-lg">
+                                                    ₹{((auctionState.current_bid || auctionState.current_base_price || 0) + 25000).toLocaleString()}
+                                                </p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-slate-500 text-[10px] uppercase tracking-wider">Bid Increment</p>
+                                                <p className="text-white font-bold">₹25,000</p>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                                     {/* Add team roster count for winning team */}
-                                     {auctionState?.current_bidder_team_id && (
-                                         <div className="mt-4 bg-slate-900/40 border border-white/5 rounded-xl p-4">
-                                             <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-2">Winning Team Roster</p>
-                                             <div className="flex items-center gap-2">
-                                                 <Users className="w-4 h-4 text-slate-400" />
-                                                 <span className="text-white font-bold">
-                                                     {(() => {
-                                                         const teamPlayers = players?.filter((p: any) => p.sold_to_team_id === auctionState.current_bidder_team_id && !p.is_captain).length || 0;
-                                                         return `${teamPlayers}/9 players`;
-                                                     })()}
-                                                 </span>
-                                             </div>
-                                         </div>
-                                     )}
-
-                                     <div className="grid grid-cols-2 gap-6 w-full mt-auto">
+                                    {/* Sale Buttons */}
+                                    <div className="grid grid-cols-2 gap-6 mt-auto">
                                         <button
                                             onClick={markSold}
                                             disabled={!auctionState.current_bidder_team_id}
@@ -2417,44 +2594,139 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
 
                     <div className="flex-1 glass-card bg-slate-950/20 border border-white/5 rounded-[2.5rem] p-8 flex flex-col min-h-0">
                         <div className="flex items-center justify-between mb-8 shrink-0">
-                            <h3 className="text-slate-500 uppercase text-[10px] font-black tracking-[0.4em]">Transaction Feed</h3>
+                            <h3 className="text-slate-500 uppercase text-[10px] font-black tracking-[0.4em]">
+                                {auctionState?.current_player ? 'Live Bids' : 'Transaction Feed'}
+                            </h3>
                             <div className="flex items-center gap-2">
                                 <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
                                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Live Sync</span>
                             </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-hide">
-                            <AnimatePresence initial={false}>
-                                {recentBids?.length === 0 ? (
-                                    <p className="text-center py-10 text-slate-700 font-sans italic">Silence on the floor...</p>
-                                ) : (
-                                    recentBids?.map((b: any, i: number) => (
-                                        <motion.div
-                                            key={b.id}
-                                            initial={{ opacity: 0, x: -20 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex justify-between items-center transition-all hover:bg-slate-900 shadow-sm"
-                                        >
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-xl bg-slate-950 flex items-center justify-center border border-white/5 text-[10px] font-black text-primary">
-                                                    {b.team?.team_name?.substring(0, 2).toUpperCase()}
+                        <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide">
+                            {auctionState?.current_player ? (
+                                <BidHistory
+                                    bids={bids}
+                                    topBids={topBids}
+                                    historyBids={historyBids}
+                                    currentBidAmount={auctionState?.current_bid_amount}
+                                />
+                            ) : (
+                                <AnimatePresence initial={false}>
+                                    {recentBids?.length === 0 ? (
+                                        <p className="text-center py-10 text-slate-700 font-sans italic">Silence on the floor...</p>
+                                    ) : (
+                                        recentBids?.map((b: any, i: number) => (
+                                            <motion.div
+                                                key={b.id}
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex justify-between items-center transition-all hover:bg-slate-900 shadow-sm mb-3"
+                                            >
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 rounded-xl bg-slate-950 flex items-center justify-center border border-white/5 text-[10px] font-black text-primary">
+                                                        {b.team?.team_name?.substring(0, 2).toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <span className="font-display font-black text-white text-xs tracking-wider block uppercase">{b.team?.team_name}</span>
+                                                        <span className="text-[10px] text-slate-500 font-medium">Bidding on {b.player?.name}</span>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <span className="font-display font-black text-white text-xs tracking-wider block uppercase">{b.team?.team_name}</span>
-                                                    <span className="text-[10px] text-slate-500 font-medium">Bidding on {b.player?.name}</span>
-                                                </div>
-                                            </div>
-                                            <span className="font-display font-black text-primary text-xl tracking-tighter">₹{b.bid_amount.toLocaleString()}</span>
-                                        </motion.div>
-                                    ))
-                                )}
-                            </AnimatePresence>
+                                                <span className="font-display font-black text-primary text-xl tracking-tighter">₹{b.bid_amount?.toLocaleString() || '0'}</span>
+                                            </motion.div>
+                                        ))
+                                    )}
+                                </AnimatePresence>
+                            )}
                         </div>
                     </div>
                 </div>
 
-                {/* Right Col: Player Queue */}
-                <div className="w-1/2 glass-card bg-slate-950/40 border border-white/5 rounded-[2.5rem] flex flex-col min-h-0 relative z-10">
+                {/* Right Col: Team Eligibility & Player Queue */}
+                <div className="w-1/2 flex flex-col gap-8 min-h-0">
+                    {/* Team Eligibility Card */}
+                    {auctionState?.current_player && (
+                        <div className="glass-card bg-slate-950/40 border border-white/5 rounded-[2.5rem] p-8 flex flex-col shrink-0">
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="font-display text-xl font-black text-white tracking-tight uppercase">Team Eligibility</h3>
+                                <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-3 py-1 rounded-full font-black tracking-widest uppercase">
+                                    {teamEligibility.filter((t: any) => t.canBid).length} / {teamEligibility.length} Eligible
+                                </span>
+                            </div>
+
+                            <div className="space-y-3 max-h-[300px] overflow-y-auto scrollbar-hide">
+                                {teamEligibility.length === 0 ? (
+                                    <div className="text-center py-6 text-slate-700">
+                                        <p className="font-display text-sm uppercase tracking-[0.2em] opacity-40">Loading...</p>
+                                    </div>
+                                ) : (
+                                    teamEligibility.map((team: any) => {
+                                        const banned = isTeamBanned(team.teamId);
+                                        return (
+                                            <div
+                                                key={team.teamId}
+                                                className={`p-4 rounded-2xl flex items-center justify-between transition-all ${
+                                                    team.canBid && !banned
+                                                        ? 'bg-slate-900/40 border border-white/5'
+                                                        : 'bg-destructive/5 border border-destructive/20'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-3 flex-1">
+                                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black ${
+                                                        team.canBid && !banned ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'
+                                                    }`}>
+                                                        {team.teamName?.substring(0, 2).toUpperCase()}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-display text-sm font-black text-white tracking-wider truncate uppercase">
+                                                            {team.teamName}
+                                                        </p>
+                                                        {banned && (
+                                                            <p className="text-destructive text-xs font-black uppercase tracking-wider mt-1">
+                                                                BANNED
+                                                            </p>
+                                                        )}
+                                                        {!team.canBid && !banned && team.reasons.length > 0 && (
+                                                            <p className="text-[10px] text-destructive font-medium truncate mt-1">
+                                                                {team.reasons[0]}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-4 ml-4">
+                                                    <div className="text-right">
+                                                        <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Max Bid</p>
+                                                        <p className="font-display text-sm font-black text-white tracking-tighter">
+                                                            ₹{team.maxBid?.toLocaleString() || '0'}
+                                                        </p>
+                                                    </div>
+                                                    {banned ? (
+                                                        <button
+                                                            onClick={() => handleUnbanTeam(team.teamId)}
+                                                            className="p-2 rounded-xl bg-green-500/10 border border-green-500/20 text-green-500 hover:bg-green-500/20 transition-all"
+                                                            title="Unban team"
+                                                        >
+                                                            <Shield className="w-4 h-4" />
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleBanTeam(team.teamId, team.teamName)}
+                                                            className="p-2 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-all"
+                                                            title="Ban team from bidding"
+                                                        >
+                                                            <Shield className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Player Queue Card */}
+                    <div className="glass-card bg-slate-950/40 border border-white/5 rounded-[2.5rem] flex flex-col min-h-0 flex-1">
                     <div className="p-8 border-b border-white/5 shrink-0 flex justify-between items-center">
                         <h3 className="font-display text-2xl font-black text-white tracking-tight uppercase">Operational Queue</h3>
                         <span className="glass px-4 py-2 rounded-xl text-[10px] font-black text-slate-400 tracking-widest uppercase">{filteredUnsoldPlayers.length} Units</span>
@@ -2558,10 +2830,10 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                                     <div className="flex items-center gap-6">
                                         <div className="text-right">
                                             <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest mb-0.5">Base</p>
-                                            <p className="font-display text-white font-black">₹{p.base_price.toLocaleString()}</p>
+                                            <p className="font-display text-white font-black">₹{p.base_price?.toLocaleString() || '0'}</p>
                                         </div>
                                         <button
-                                            onClick={() => putOnBlock(p)}
+                                            onClick={() => handleDeployPlayer(p)}
                                             disabled={!!auctionState?.current_player_id || !isLive}
                                             className="bg-primary/10 hover:bg-primary text-primary hover:text-white border border-primary/20 hover:border-primary px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 disabled:opacity-0 disabled:pointer-events-none flex items-center gap-2"
                                         >
@@ -2572,6 +2844,7 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                             ))}
                         </div>
                     </div>
+                </div>
                 </div>
 
             </div>
@@ -2642,6 +2915,165 @@ function LiveControllerTab({ auctionState, settings, players }: any) {
                                     className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)]"
                                 >
                                     Save Settings
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
+
+            {/* Deploy Player Confirmation Modal */}
+            {showDeployConfirm && playerToDeploy && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="glass-card bg-slate-900 border border-white/10 rounded-[2rem] p-8 max-w-md w-full mx-4 shadow-2xl"
+                    >
+                        <div className="text-center">
+                            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-primary/20">
+                                <Gavel className="w-8 h-8 text-primary" />
+                            </div>
+                            <h3 className="font-display text-2xl font-black text-white tracking-tight mb-2">CONFIRM DEPLOYMENT</h3>
+                            <p className="text-slate-400 font-sans mb-6">
+                                Deploy <span className="text-white font-bold">{playerToDeploy.name}</span> to auction?<br/>
+                                <span className="text-gold">Base Price: ₹{playerToDeploy.base_price?.toLocaleString()}</span>
+                            </p>
+                            <div className="flex gap-4">
+                                <button
+                                    onClick={() => {
+                                        setShowDeployConfirm(false);
+                                        setPlayerToDeploy(null);
+                                    }}
+                                    className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                                >
+                                    CANCEL
+                                </button>
+                                <button
+                                    onClick={confirmDeploy}
+                                    className="flex-1 py-4 rounded-2xl bg-primary text-white hover:bg-primary/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(59,130,246,0.2)]"
+                                >
+                                    DEPLOY
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
+
+            {/* Timer Expiry Modal */}
+            {showExpiryModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="glass-card bg-slate-900 border border-destructive/20 rounded-[2rem] p-8 max-w-lg w-full mx-4 shadow-2xl"
+                    >
+                        <div className="text-center">
+                            <div className="w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-destructive/20">
+                                <XCircle className="w-8 h-8 text-destructive" />
+                            </div>
+                            <h3 className="font-display text-2xl font-black text-white tracking-tight mb-2">TIME'S UP!</h3>
+                            
+                            {expiryModalType === 'no_bids' ? (
+                                <>
+                                    <p className="text-slate-400 font-sans mb-6">
+                                        No bids received for this player.<br/>
+                                        What would you like to do?
+                                    </p>
+                                    <div className="flex gap-4">
+                                        <button
+                                            onClick={handleExpiryNoBids}
+                                            className="flex-1 py-4 rounded-2xl bg-destructive text-white hover:bg-destructive/90 transition-all font-black tracking-widest"
+                                        >
+                                            KEEP UNSOLD
+                                        </button>
+                                        <button
+                                            onClick={handleExpiryReauction}
+                                            className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)]"
+                                        >
+                                            RE-AUCTION
+                                        </button>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-slate-400 font-sans mb-2">
+                                        Auction completed! Current highest bid:
+                                    </p>
+                                    <p className="text-3xl font-display font-black text-gold mb-4">
+                                        ₹{auctionState?.current_bid_amount?.toLocaleString()}
+                                    </p>
+                                    <p className="text-white font-bold mb-6">
+                                        by {auctionState?.current_bidder?.team_name || 'Unknown Team'}
+                                    </p>
+                                    <div className="flex gap-4">
+                                        <button
+                                            onClick={handleExpiryModifyBid}
+                                            className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                                        >
+                                            MODIFY BID
+                                        </button>
+                                        <button
+                                            onClick={handleExpiryConfirmSale}
+                                            className="flex-1 py-4 rounded-2xl bg-green-500 text-white hover:bg-green-400 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)]"
+                                        >
+                                            CONFIRM SALE
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </motion.div>
+                </div>
+            )}
+
+            {/* Modify Bid Modal */}
+            {showModifyBid && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="glass-card bg-slate-900 border border-white/10 rounded-[2rem] p-8 max-w-md w-full mx-4 shadow-2xl"
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="font-display text-2xl font-black text-white tracking-tight">MODIFY SALE</h3>
+                            <button onClick={() => setShowModifyBid(false)} className="text-slate-400 hover:text-white">
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-6">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">
+                                    Final Bid Amount (₹)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={modifyBidAmount}
+                                    onChange={(e) => setModifyBidAmount(parseInt(e.target.value) || 0)}
+                                    className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
+                                />
+                            </div>
+
+                            <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl">
+                                <p className="text-yellow-500 text-sm font-medium">
+                                    Warning: Modifying the bid from the actual highest bid will be recorded as-is.
+                                </p>
+                            </div>
+
+                            <div className="flex gap-4 pt-4">
+                                <button
+                                    onClick={() => setShowModifyBid(false)}
+                                    className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={confirmModifyBid}
+                                    className="flex-1 py-4 rounded-2xl bg-green-500 text-white hover:bg-green-400 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)]"
+                                >
+                                    Confirm Sale
                                 </button>
                             </div>
                         </div>

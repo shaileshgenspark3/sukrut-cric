@@ -5,14 +5,21 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRealtimeSubscription } from '@/hooks/useRealtime';
+import { useTimer } from '@/hooks/useTimer';
+import { formatMinutesSeconds } from '@/lib/services/timer/timerService';
 import {
     Loader2, LogOut, Wallet, User as UserIcon,
     Users, Trophy, AlertCircle, Info, Zap,
     Shield, Target, ChevronRight, PieChart,
-    ArrowUpRight, Flame
+    ArrowUpRight, Flame, PlayCircle, PauseCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
+import { PlayerCard } from '@/components/admin/PlayerCard';
+import { useBids } from '@/hooks/useBids';
+import { BidHistory } from '@/components/admin/BidHistory';
+import { calculateMaxBid, getTeamEligibility, checkCategoryEligibility } from '@/lib/validation/bidValidation';
+import { placeBidWithValidation } from '@/lib/actions/bids';
 
 export default function CaptainDashboard() {
     const router = useRouter();
@@ -101,9 +108,53 @@ export default function CaptainDashboard() {
     const nextBid = currentBid + increment;
 
     const isAuctionLive = settings?.is_auction_live;
-    const isPlayerOnBlock = auctionState?.status === 'bidding' && auctionState?.current_player;
+    const isPlayerOnBlock = (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid') && auctionState?.current_player;
     const isHighestBidder = auctionState?.current_bidder_team_id === team?.id;
     const playerGender = auctionState?.current_player?.gender;
+
+    // Timer hook for countdown display
+    const { totalSeconds, isPaused, isRunning } = useTimer();
+
+    // Bids hook for real-time bid display
+    const { bids, topBids, historyBids, isLoading: bidsLoading } = useBids(
+        auctionState?.current_player?.id || null
+    );
+
+    // Max bid calculation for current player
+    const [maxBid, setMaxBid] = useState(0);
+    const [bidEligibility, setBidEligibility] = useState<{ canBid: boolean; reasons: string[] }>({ canBid: true, reasons: [] });
+    const [categoryEligibility, setCategoryEligibility] = useState<{ eligible: boolean; reason?: string }>({ eligible: true });
+
+    useEffect(() => {
+        const fetchMaxBid = async () => {
+            if (!team?.id || !auctionState?.current_player?.id) {
+                setMaxBid(0);
+                setBidEligibility({ canBid: true, reasons: [] });
+                setCategoryEligibility({ eligible: true });
+                return;
+            }
+
+            try {
+                const eligibility = await getTeamEligibility(team.id, auctionState.current_player.id);
+                setMaxBid(eligibility.maxBid);
+                setBidEligibility({ canBid: eligibility.canBid, reasons: eligibility.reasons });
+
+                const categoryCheck = await checkCategoryEligibility(
+                    team.id,
+                    auctionState.current_player.category,
+                    auctionState.current_player.gender
+                );
+                setCategoryEligibility(categoryCheck);
+            } catch (error) {
+                console.error("Failed to calculate max bid:", error);
+                setMaxBid(0);
+                setBidEligibility({ canBid: false, reasons: ["Failed to calculate max bid"] });
+                setCategoryEligibility({ eligible: true });
+            }
+        };
+
+        fetchMaxBid();
+    }, [team?.id, auctionState?.current_player?.id, auctionState?.current_bid]);
 
     const [showVictory, setShowVictory] = useState(false);
 
@@ -129,6 +180,9 @@ export default function CaptainDashboard() {
     if (!isAuctionLive) bidDisabledReason = 'Auction is paused';
     else if (!isPlayerOnBlock) bidDisabledReason = 'Waiting for player';
     else if (isHighestBidder) bidDisabledReason = 'You are the highest bidder!';
+    else if (!categoryEligibility.eligible) bidDisabledReason = categoryEligibility.reason || 'Category limit reached';
+    else if (nextBid > maxBid) bidDisabledReason = `Max bid is ₹${maxBid.toLocaleString()}`;
+    else if (!bidEligibility.canBid && bidEligibility.reasons.length > 0) bidDisabledReason = bidEligibility.reasons[0];
     else if (availableTokens < nextBid) bidDisabledReason = 'Insufficient tokens';
     else if (playerGender === 'Male' && maleCount >= maxMale) bidDisabledReason = 'Max male players reached';
     else if (playerGender === 'Female' && femaleCount >= maxFemale) bidDisabledReason = 'Max female players reached';
@@ -137,20 +191,15 @@ export default function CaptainDashboard() {
         mutationFn: async () => {
             if (bidDisabledReason || !team?.id || !auctionState?.current_player?.id) return;
 
-            const { error: bidErr } = await supabase.from('bids').insert({
-                player_id: auctionState.current_player.id,
-                team_id: team.id,
-                bid_amount: nextBid,
-            });
-            if (bidErr) throw bidErr;
+            const result = await placeBidWithValidation(
+                auctionState.current_player.id,
+                team.id,
+                nextBid
+            );
 
-            const { error: stateErr } = await supabase.from('auction_state').update({
-                current_bid: nextBid,
-                current_bidder_team_id: team.id,
-                updated_at: new Date().toISOString()
-            }).eq('id', auctionState.id);
-
-            if (stateErr) throw stateErr;
+            if (!result.success) {
+                throw new Error(result.message);
+            }
         }
     });
 
@@ -369,6 +418,37 @@ export default function CaptainDashboard() {
                                 </div>
 
                                 <div className="w-full lg:w-3/5 flex flex-col h-full justify-center">
+                                    {/* Timer Display */}
+                                    {auctionState?.current_player && (
+                                        <div className={`mb-6 p-4 rounded-[2rem] text-center relative overflow-hidden ${
+                                            isPaused 
+                                                ? 'bg-slate-900/60 border-2 border-yellow-500/30' 
+                                                : totalSeconds <= 10 
+                                                    ? 'bg-destructive/10 border-2 border-destructive/30 animate-pulse' 
+                                                    : totalSeconds <= 20 
+                                                        ? 'bg-orange-500/10 border-2 border-orange-500/30'
+                                                        : 'bg-slate-900/40 border border-white/5'
+                                        }`}>
+                                            {isPaused && (
+                                                <div className="absolute inset-0 flex items-center justify-center bg-slate-950/50 z-10">
+                                                    <span className="bg-yellow-500 text-black px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest animate-pulse">
+                                                        PAUSED
+                                                    </span>
+                                                </div>
+                                            )}
+                                            <p className="text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black mb-1">
+                                                {isPaused ? 'Timer Frozen At' : isRunning ? 'Time Remaining' : 'Timer Stopped'}
+                                            </p>
+                                            <div className={`font-display font-black tracking-tighter ${
+                                                totalSeconds <= 10 ? 'text-destructive text-5xl' : 
+                                                totalSeconds <= 20 ? 'text-orange-500 text-5xl' : 
+                                                'text-white text-5xl'
+                                            }`}>
+                                                {formatMinutesSeconds(totalSeconds)}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="bg-slate-950/60 border border-white/5 rounded-[2.5rem] p-10 mb-10 text-center relative overflow-hidden group/bid">
                                         <div className="absolute inset-0 bg-gold/5 opacity-0 group-hover/bid:opacity-100 transition-opacity duration-700" />
                                         <p className="text-slate-500 text-[10px] uppercase font-black tracking-[0.4em] mb-4">Current Valuation</p>
@@ -417,6 +497,48 @@ export default function CaptainDashboard() {
                                         </div>
                                         {!bidDisabledReason && <div className="absolute inset-x-0 bottom-0 h-1 bg-black/20 group-hover/btn:h-full transition-all duration-700 pointer-events-none" />}
                                     </button>
+
+                                    {/* Max Bid Display */}
+                                    {isPlayerOnBlock && maxBid > 0 && (
+                                        <div className={`mt-4 p-4 rounded-2xl text-center ${nextBid > maxBid ? 'bg-destructive/10 border border-destructive/30' : 'bg-primary/10 border border-primary/30'}`}>
+                                            <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400 mb-1">Your Maximum Bid</p>
+                                            <p className={`font-display font-black text-2xl ${nextBid > maxBid ? 'text-destructive' : 'text-primary'}`}>
+                                                ₹{maxBid.toLocaleString()}
+                                            </p>
+                                            {nextBid > maxBid && (
+                                                <p className="text-destructive text-xs mt-2 font-medium">
+                                                    Bid exceeds your maximum
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Category Limit Warning */}
+                                    {isPlayerOnBlock && !categoryEligibility.eligible && (
+                                        <div className="mt-4 p-4 rounded-2xl bg-destructive/10 border border-destructive/30 text-center">
+                                            <div className="flex items-center justify-center gap-2 mb-2">
+                                                <AlertCircle className="w-5 h-5 text-destructive" />
+                                                <p className="text-[10px] uppercase tracking-[0.3em] text-destructive font-black">
+                                                    Category Limit Reached
+                                                </p>
+                                            </div>
+                                            <p className="text-destructive text-sm font-medium">
+                                                {categoryEligibility.reason}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Bid History Display */}
+                                    {auctionState?.current_player && bids.length > 0 && (
+                                        <div className="mt-6">
+                                            <BidHistory
+                                                bids={bids}
+                                                topBids={topBids}
+                                                historyBids={historyBids}
+                                                currentBidAmount={currentBid}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             </motion.div>
                         )}
