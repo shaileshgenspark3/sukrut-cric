@@ -1,9 +1,5 @@
 import { z } from 'zod';
 
-/**
- * Zod schema for validating player CSV import rows.
- * All fields match the CSV headers used in the Players tab.
- */
 export const PlayerCSVSchema = z.object({
   'Name': z.string().min(1, 'Name is required'),
   'Classifications': z.enum(['A+', 'A', 'B', 'C', 'F']).default('B'),
@@ -19,8 +15,4 @@ export const PlayerCSVSchema = z.object({
   'Market Base': z.coerce.number().int().min(100).default(1000)
 });
 
-/**
- * TypeScript type inferred from PlayerCSVSchema.
- * Use this type when working with validated CSV rows.
- */
 export type PlayerCSVRow = z.infer<typeof PlayerCSVSchema>;

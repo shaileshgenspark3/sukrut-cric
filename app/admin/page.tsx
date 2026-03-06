@@ -1280,16 +1280,16 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                                         <td className="px-4 py-6">
                                             <span className="bg-slate-900 border border-white/5 px-3 py-1.5 rounded-lg text-gold font-mono font-bold tracking-widest text-xs group-hover/row:border-gold/30 transition-all">{t.captain_password}</span>
                                         </td>
-                                        <td className="px-4 py-6 text-right font-sans font-medium text-slate-500 text-xs tracking-tight">{t.phone_number}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </motion.div>
-    );
+                                         <td className="px-4 py-6 text-right font-sans font-medium text-slate-500 text-xs tracking-tight">{t.phone_number}</td>
+                                     </tr>
+                                 ))}
+                             </tbody>
+                          </table>
+                      </div>
+                  </div>
+              </div>
+          </motion.div>
+       );
 }
 
 function StatCard({ title, value, icon: Icon, color, accent, isLive }: any) {
@@ -1327,6 +1327,9 @@ function PlayersTab({ players, ...modalProps }: any) {
     const [search, setSearch] = useState("");
     const [filterCat, setFilterCat] = useState("All");
     const playersFileInputRef = useRef<HTMLInputElement>(null);
+    const [showEraseConfirm, setShowEraseConfirm] = useState(false);
+    const [erasing, setErasing] = useState(false);
+    const queryClient = useQueryClient();
 
     const filtered = players?.filter((p: any) => {
         if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
@@ -1340,6 +1343,61 @@ function PlayersTab({ players, ...modalProps }: any) {
     };
 
     const filteredWithSerial = getFilteredWithSerial();
+
+    const eraseAllPlayers = async () => {
+        setErasing(true);
+        try {
+            const { error } = await supabase.from('players').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            if (error) throw error;
+            queryClient.invalidateQueries({ queryKey: ['players'] });
+            setShowEraseConfirm(false);
+            alert('All players erased successfully!');
+        } catch (err: any) {
+            alert('Error erasing players: ' + err.message);
+        } finally {
+            setErasing(false);
+        }
+    };
+
+    function EraseAllConfirmationModal({ show, onClose, onConfirm, loading }: any) {
+        if (!show) return null;
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="glass-card bg-slate-900 border border-destructive/20 rounded-[2rem] p-8 max-w-md w-full mx-4 shadow-2xl"
+                >
+                    <div className="text-center">
+                        <div className="w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-destructive/20">
+                            <Trash2 className="w-8 h-8 text-destructive" />
+                        </div>
+                        <h3 className="font-display text-2xl font-black text-white tracking-tight mb-2">CONFIRM ERASE ALL</h3>
+                        <p className="text-slate-400 font-sans mb-6">
+                            This will <strong>permanently delete all players</strong> from the database.<br/>
+                            This action cannot be undone!
+                        </p>
+                        <div className="flex gap-4">
+                            <button
+                                onClick={onClose}
+                                disabled={loading}
+                                className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest disabled:opacity-50"
+                            >
+                                CANCEL
+                            </button>
+                            <button
+                                onClick={onConfirm}
+                                disabled={loading}
+                                className="flex-1 py-4 rounded-2xl bg-destructive text-white hover:bg-destructive/90 transition-all font-black tracking-widest disabled:opacity-50"
+                            >
+                                {loading ? <Loader2 className="w-5 h-5 animate-spin inline" /> : 'ERASE ALL'}
+                            </button>
+                        </div>
+                    </div>
+                </motion.div>
+            </div>
+        );
+    }
 
     const exportPlayersCSV = () => {
         if (!players || players.length === 0) return;
@@ -1376,41 +1434,64 @@ function PlayersTab({ players, ...modalProps }: any) {
                 const rows = results.data as any[];
                 let successCount = 0;
                 let skipCount = 0;
+                let errorCount = 0;
+                const errors: string[] = [];
 
                 for (const row of rows) {
-                    if (!row['Name']) continue;
-
-                    const name = row['Name'].trim();
-                    const existingPlayer = players?.find((p: any) => p.name.toLowerCase() === name.toLowerCase());
-
-                    if (existingPlayer) {
-                        skipCount++;
-                        continue;
-                    }
-
                     try {
+                        // Import PlayerCSVSchema
+                        const { PlayerCSVSchema } = await import('@/lib/csv/playerSchema');
+
+                        // Validate row with Zod schema
+                        const validated = PlayerCSVSchema.parse(row);
+
+                        const name = validated.Name.trim();
+                        const existingPlayer = players?.find((p: any) => p.name.toLowerCase() === name.toLowerCase());
+
+                        if (existingPlayer) {
+                            skipCount++;
+                            continue;
+                        }
+
                         await supabase.from('players').insert({
                             name,
-                            category: row['Classifications'] || 'B',
-                            age: parseInt(row['Age']) || 25,
-                            height: row['Height'] || '',
-                            handy: row['Handy'] || 'Right-hand',
-                            type: row['Type'] || 'Top-order',
-                            earlier_seasons: row['Earlier Seasons'] || '',
-                            achievements: row['Achievements'] || '',
-                            special_remarks: row['Special Remarks'] || '',
-                            playing_role: row['Combat Role'] || 'Batsman',
-                            gender: row['Variant'] || 'Male',
-                            base_price: parseInt(row['Market Base']) || 1000,
+                            category: validated.Classifications,
+                            age: validated.Age,
+                            height: validated.Height,
+                            handy: validated.Handy,
+                            type: validated.Type,
+                            earlier_seasons: validated['Earlier Seasons'],
+                            achievements: validated.Achievements,
+                            special_remarks: validated['Special Remarks'],
+                            playing_role: validated['Combat Role'],
+                            gender: validated.Variant,
+                            base_price: validated['Market Base'],
                             image_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`
                         });
                         successCount++;
-                    } catch (err) {
-                        console.error('Error importing player:', err);
+                    } catch (err: any) {
+                        errorCount++;
+                        errors.push(`${row.Name || 'Unknown'}: ${err.message}`);
                     }
                 }
 
-                alert(`Import completed!\nCreated: ${successCount}\nSkipped (already exists): ${skipCount}`);
+                // Show detailed import results
+                const resultMsg = [
+                    `Import completed!`,
+                    `Created: ${successCount}`,
+                    `Skipped (already exists): ${skipCount}`,
+                    `Errors: ${errorCount}`
+                ].join('\n');
+
+                if (errors.length > 0 && errors.length <= 5) {
+                    alert(resultMsg + '\n\nError details:\n' + errors.join('\n'));
+                } else if (errors.length > 5) {
+                    alert(resultMsg + `\n\nFirst 5 errors:\n${errors.slice(0, 5).join('\n')}`);
+                } else {
+                    alert(resultMsg);
+                }
+
+                queryClient.invalidateQueries({ queryKey: ['players'] });
                 if (playersFileInputRef.current) {
                     playersFileInputRef.current.value = '';
                 }
@@ -1478,6 +1559,13 @@ function PlayersTab({ players, ...modalProps }: any) {
                     >
                         <Download className="w-4 h-4" />
                         EXPORT CSV
+                    </button>
+                    <button
+                        onClick={() => setShowEraseConfirm(true)}
+                        className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-2"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                        ERASE ALL
                     </button>
                     <button
                         onClick={() => modalProps.setShowAddPlayer(true)}
@@ -1612,8 +1700,29 @@ function RulesTab({ rules, settings }: any) {
     const [globalPurse, setGlobalPurse] = useState(settings?.global_purse?.toString() || "30000");
 
     const updateGlobalPurse = async () => {
-        await supabase.from("tournament_settings").update({ global_purse: parseInt(globalPurse) }).eq("id", settings.id);
-        queryClient.invalidateQueries({ queryKey: ["settings"] });
+        try {
+            // Update tournament_settings
+            const { error: settingsError } = await supabase
+                .from("tournament_settings")
+                .update({ global_purse: parseInt(globalPurse) })
+                .eq("id", settings.id);
+
+            if (settingsError) throw settingsError;
+
+            // Update all teams' starting_purse in auction_rules
+            const { error: rulesError } = await supabase
+                .from("auction_rules")
+                .update({ starting_purse: parseInt(globalPurse) })
+                .not('team_id', 'is', null);
+
+            if (rulesError) throw rulesError;
+
+            queryClient.invalidateQueries({ queryKey: ["settings"] });
+            queryClient.invalidateQueries({ queryKey: ["rules"] });
+            alert(`Global purse updated to ₹${parseInt(globalPurse).toLocaleString()} for all teams`);
+        } catch (err: any) {
+            alert('Error updating global purse: ' + err.message);
+        }
     };
 
     const updateDeduction = async (ruleId: string, val: string) => {
