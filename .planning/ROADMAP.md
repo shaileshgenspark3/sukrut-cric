@@ -81,7 +81,10 @@
 9. Captain dashboard clears screen between players, shows purchase details when sold/unsold, and remains blank until next player deployed
 10. Base price of current player is visible to all participants, and bid increments of 25,000 are applied correctly
 
-**Plans:** TBD
+**Plans:** 3 plans (Wave 1: 1 plan, Wave 2: 1 plan, Wave 3: 1 plan)
+- [ ] 3-live-auction-core-01-PLAN.md — Implement timer management system with pause/resume and configurable settings (RULE-03, RULE-04, FLOW-01, FLOW-06, FLOW-07)
+- [ ] 3-live-auction-core-02-PLAN.md — Implement auction flow orchestration: player deployment, timer expiry handling, sale confirmation (RULE-02, FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, DISPLAY-03, DISPLAY-04, DISPLAY-05)
+- [ ] 3-live-auction-core-03-PLAN.md — Implement real-time bid display: top 3 bids prominently, history from 4th onwards (DISPLAY-01, DISPLAY-02)
 
 ---
 
@@ -137,7 +140,7 @@
 |-------|----------------|--------|-----------|
 | 1. Foundation & Data Management | 0/3 | Planned | - |
 | 2. Captain System & Rules Configuration | 0/4 | Planned | - |
-| 3. Live Auction Core | 0/3 | Not started | - |
+| 3. Live Auction Core | 0/3 | Planned | - |
 | 4. Bid Validation & Enforcement | 0/2 | Not started | - |
 | 5. Logging, Manual Sales & Data Integrity | 0/3 | Not started | - |
 
