@@ -9,20 +9,20 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Bug Fixes
 
-- [ ] **BUG-01**: Edit and Delete buttons work in Admin Overview tab (team editing, captain editing)
-- [ ] **BUG-02**: Edit and Delete buttons work in Admin Players tab (player editing, player deletion)
-- [ ] **BUG-03**: Purse amount update works (change from 30,000 to 30,00,000, "apply global" button persists to database)
+- [x] **BUG-01**: Edit and Delete buttons work in Admin Overview tab (team editing, captain editing)
+- [x] **BUG-02**: Edit and Delete buttons work in Admin Players tab (player editing, player deletion)
+- [x] **BUG-03**: Purse amount update works (change from 30,000 to 30,00,000, "apply global" button persists to database)
 
 ### Data Management
 
-- [ ] **DATA-01**: CSV upload for bulk player import supports all fields (name, category, age, height, handy, type, earlier_seasons, achievements, special_remarks, playing_role, gender, base_price)
-- [ ] **DATA-02**: "Erase All Players" button in Players tab with confirmation dialog
-- [ ] **DATA-03**: System enforces max 9 players per team during player addition (shows error if team roster full)
+- [x] **DATA-01**: CSV upload for bulk player import supports all fields (name, category, age, height, handy, type, earlier_seasons, achievements, special_remarks, playing_role, gender, base_price)
+- [x] **DATA-02**: "Erase All Players" button in Players tab with confirmation dialog
+- [x] **DATA-03**: System enforces max 9 players per team during player addition (shows error if team roster full)
 - [ ] **DATA-04**: CSV export of auction logs in Log Entries tab (all fields, downloadable as .xlsx and .csv)
 
 ### Admin Controls
 
-- [ ] **ADMIN-01**: Search functionality in Live Controller for selecting players to deploy (search by player name, filters by category/role/gender)
+- [x] **ADMIN-01**: Search functionality in Live Controller for selecting players to deploy (search by player name, filters by category/role/gender)
 
 ### Captain System
 
@@ -138,14 +138,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BUG-01 | Phase 1 | Pending |
-| BUG-02 | Phase 1 | Pending |
-| BUG-03 | Phase 1 | Pending |
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
-| DATA-03 | Phase 1 | Pending |
+| BUG-01 | Phase 1 | Complete |
+| BUG-02 | Phase 1 | Complete |
+| BUG-03 | Phase 1 | Complete |
+| DATA-01 | Phase 1 | Complete |
+| DATA-02 | Phase 1 | Complete |
+| DATA-03 | Phase 1 | Complete |
 | DATA-04 | Phase 5 | Pending |
-| ADMIN-01 | Phase 1 | Pending |
+| ADMIN-01 | Phase 1 | Complete |
 | CAPT-01 | Phase 2 | Pending |
 | CAPT-02 | Phase 2 | Pending |
 | CAPT-03 | Phase 2 | Pending |
