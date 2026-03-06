@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRealtimeSubscription } from '@/hooks/useRealtime';
+import { assignCaptain, removeCaptain } from '@/lib/actions/captains';
 import {
     Loader2, LogOut, LayoutDashboard, Users, Gavel,
     Settings, ListPlus, PlayCircle, PauseCircle,
     CheckCircle, XCircle, Activity, Shield,
     Trophy, Search, Filter, ChevronRight,
-    Download, Upload, Plus, Trash2, Edit, X
+    Download, Upload, Plus, Trash2, Edit, X, Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
@@ -107,6 +108,7 @@ export default function AdminDashboard() {
     const tabs = [
         { id: "dashboard", label: "Overview", icon: LayoutDashboard },
         { id: "players", label: "Players", icon: Users },
+        { id: "captain", label: "Captain Selection", icon: Trophy },
         { id: "rules", label: "Auction Rules", icon: Settings },
         { id: "live", label: "Live Controller", icon: Gavel, requiresCore: true }
     ];
@@ -188,6 +190,7 @@ export default function AdminDashboard() {
             <main className="flex-1 p-6 md:p-8 overflow-y-auto">
                 {activeTab === "dashboard" && <OverviewTab teams={teams} players={players} settings={settings} {...modalProps} />}
                 {activeTab === "players" && <PlayersTab players={players} {...modalProps} />}
+                {activeTab === "captain" && <CaptainSelectionTab teams={teams} players={players} />}
                 {activeTab === "rules" && <RulesTab rules={rules} settings={settings} />}
                 {activeTab === "live" && <LiveControllerTab auctionState={auctionState} settings={settings} players={players} />}
             </main>
@@ -1803,6 +1806,133 @@ function RulesTab({ rules, settings }: any) {
                         ))}
                     </tbody>
                 </table>
+            </div>
+        </motion.div>
+    );
+}
+
+function CaptainSelectionTab({ teams, players }: any) {
+    const queryClient = useQueryClient();
+    const [selectedCaptainId, setSelectedCaptainId] = useState<Record<string, string>>({});
+
+    // Filter available players (not captain, not sold)
+    const availablePlayers = players?.filter((p: any) => !p.is_captain && !p.is_sold) || [];
+
+    const handleAssignCaptain = async (teamId: string, playerId: string) => {
+        try {
+            const result = await assignCaptain(teamId, playerId);
+            if (result.success) {
+                queryClient.invalidateQueries({ queryKey: ["teams"] });
+                queryClient.invalidateQueries({ queryKey: ["players"] });
+                queryClient.invalidateQueries({ queryKey: ["rules"] });
+                alert("Captain assigned successfully! New purse: ₹" + result.newPurse?.toLocaleString());
+                setSelectedCaptainId({ ...selectedCaptainId, [teamId]: "" });
+            }
+        } catch (err: any) {
+            alert("Error assigning captain: " + err.message);
+        }
+    };
+
+    const handleRemoveCaptain = async (teamId: string) => {
+        if (!confirm("Are you sure you want to remove this captain?")) return;
+        try {
+            const result = await removeCaptain(teamId);
+            if (result.success) {
+                queryClient.invalidateQueries({ queryKey: ["teams"] });
+                queryClient.invalidateQueries({ queryKey: ["players"] });
+                queryClient.invalidateQueries({ queryKey: ["rules"] });
+                alert("Captain removed successfully! New purse: ₹" + result.newPurse?.toLocaleString());
+            }
+        } catch (err: any) {
+            alert("Error removing captain: " + err.message);
+        }
+    };
+
+    const getAvailablePlayersForTeam = (team: any) => {
+        return availablePlayers.filter((p: any) => p.gender === team.gender);
+    };
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="space-y-10"
+        >
+            <div>
+                <h2 className="text-3xl font-display font-black text-white tracking-tight uppercase">Captain Assignment</h2>
+                <p className="text-slate-500 text-xs font-sans uppercase tracking-[0.2em] font-bold mt-1">Team Leadership Selection</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {teams?.map((team: any) => {
+                    const teamPlayers = getAvailablePlayersForTeam(team);
+                    const currentCaptain = players?.find((p: any) => p.id === team.captain_player_id);
+
+                    return (
+                        <div key={team.id} className="glass-card bg-slate-900/60 p-6 rounded-[2rem] border-white/5">
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="w-12 h-12 bg-gold/10 rounded-xl flex items-center justify-center border border-gold/20 glow-gold">
+                                    <Trophy className="w-6 h-6 text-gold" />
+                                </div>
+                                <div>
+                                    <h3 className="font-display font-black text-white tracking-widest text-lg uppercase">{team.team_name}</h3>
+                                    <p className="text-[10px] text-slate-500 font-black tracking-[0.2em] uppercase">{team.gender}</p>
+                                </div>
+                            </div>
+
+                            {currentCaptain ? (
+                                <div className="space-y-4">
+                                    <div className="bg-slate-950/80 rounded-xl p-4 border border-gold/20">
+                                        <p className="text-[10px] text-slate-500 font-black tracking-[0.2em] uppercase mb-2">Current Captain</p>
+                                        <p className="font-display font-black text-white tracking-tight text-lg">{currentCaptain.name}</p>
+                                        <p className="text-sm text-gold font-bold mt-1">{currentCaptain.category} Category</p>
+                                    </div>
+                                    <button
+                                        onClick={() => handleRemoveCaptain(team.id)}
+                                        className="w-full bg-destructive/10 hover:bg-destructive/20 text-destructive font-display font-black text-xs tracking-widest px-6 rounded-xl h-[42px] border border-destructive/30 transition-all hover:scale-105 active:scale-95 uppercase"
+                                    >
+                                        Remove Captain
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-[10px] text-slate-500 font-black tracking-[0.2em] mb-2 block uppercase">Select Captain</label>
+                                        <select
+                                            value={selectedCaptainId[team.id] || ""}
+                                            onChange={e => setSelectedCaptainId({ ...selectedCaptainId, [team.id]: e.target.value })}
+                                            className="w-full bg-slate-950/80 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-gold/30 transition-all"
+                                        >
+                                            <option value="">Select player</option>
+                                            {teamPlayers.map((player: any) => (
+                                                <option key={player.id} value={player.id}>
+                                                    {player.name} - {player.category} - {player.playing_role}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <button
+                                        onClick={() => selectedCaptainId[team.id] && handleAssignCaptain(team.id, selectedCaptainId[team.id])}
+                                        disabled={!selectedCaptainId[team.id]}
+                                        className="w-full bg-gold hover:bg-gold/90 text-black font-display font-black text-xs tracking-widest px-6 rounded-xl h-[42px] shadow-[0_4px_15px_rgba(255,215,0,0.2)] transition-all hover:scale-105 active:scale-95 uppercase disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                                    >
+                                        Assign Captain
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+
+            <div className="glass-card bg-slate-900/60 p-6 rounded-[2rem] border-white/5">
+                <div className="flex items-center gap-3 mb-4">
+                    <Info className="w-5 h-5 text-gold" />
+                    <p className="text-sm text-slate-400 font-medium">
+                        <span className="text-gold font-bold">Note:</span> A+ category captains cost ₹5,00,000, A category captains cost ₹2,00,000. B and F category captains are free.
+                        Captains are automatically added to team roster and cannot be auctioned.
+                    </p>
+                </div>
             </div>
         </motion.div>
     );
