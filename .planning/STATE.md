@@ -27,20 +27,20 @@
 ## Current Position
 
 **Phase:** Phase 2 - Captain System & Rules Configuration
-**Plan:** TBD (not yet planned)
-**Status:** Ready to plan
-**Progress Bar:** ███████░░░░░░ 40%
+**Plan:** Complete (all 4 plans executed)
+**Status:** Complete
+**Progress Bar:** ████████░░░░ 60%
 
-**Current Phase Goal:** Enable captain assignment, enforce team composition rules, and configure auction pricing rules
+**Current Phase Goal:** Enable captain assignment, enforce team composition rules, and configure auction pricing rules ✓
 
-**Phase Requirements:** CAPT-01, CAPT-02, CAPT-03, CAPT-04, CAPT-05, CAPT-06, RULE-01, RULE-06, LIFE-01, LIFE-02, LIFE-03, ADMIN-03 (12 requirements)
+**Phase Requirements:** CAPT-01, CAPT-02, CAPT-03, CAPT-04, CAPT-05, CAPT-06, RULE-01, RULE-06, LIFE-01, LIFE-02, LIFE-03, ADMIN-03 (12 requirements - all completed)
 
 ## Performance Metrics
 
 **Roadmap:**
 - Total Phases: 5
 - Requirements: 60/60 mapped ✓
-- Current Phase: 1/5
+- Current Phase: 2/5 (Phase 2 Complete)
 
 **Requirements Breakdown:**
 - v1 requirements: 60 (100% mapped)
@@ -54,17 +54,24 @@
 | Decision | Rationale | Status |
 |----------|-----------|--------|
 | Use max of actual price or base price for calculations | Safer to prevent overspending based on real spending | Pending implementation |
-| Both auto-alert + manual ban for team restrictions | System prevents most violations, admin has override for edge cases | Pending implementation |
-| Auto-add captains to roster | Captains are part of team, should be visible | Pending implementation |
-| CSV upload all player fields | Flexibility for data entry, matches database schema | Pending implementation |
+| Both auto-alert + manual ban for team restrictions | System prevents most violations, admin has override for edge cases | Implemented (2-captain-system-04) |
+| Auto-add captains to roster | Captains are part of team, should be visible | Implemented (2-captain-system-02) |
+| CSV upload all player fields | Flexibility for data entry, matches database schema | Implemented (1-foundation-02) |
 | Strict vs Override mode for manual sales | Admin has control while maintaining safety checks | Pending implementation |
-| Single admin type | Simplify permission model, reduce complexity | Pending implementation |
+| Single admin type | Simplify permission model, reduce complexity | Implemented (2-captain-system-01) |
 | Auth users are not deleted when teams are deleted | Security consideration - keep auth records | Implemented (1-foundation-01) |
 | Modal state passed via modalProps object pattern | Cleaner API for passing modal handlers | Implemented (1-foundation-01) |
 | Zod schema for comprehensive player field validation | Better than manual checks, TypeScript-first | Implemented (1-foundation-02) |
 | Global purse propagates to tournament_settings and all auction_rules | Ensure all teams have consistent starting purse | Implemented (1-foundation-02) |
 | Roster check happens before database update | Prevents partial transactions | Implemented (1-foundation-03) |
 | Logical AND operators for conditional JSX rendering | Better readability than ternary | Implemented (1-foundation-03) |
+| Captains automatically added to roster with sold_price=0 | Captains are part of team, should be counted toward roster | Implemented (2-captain-system-02) |
+| Category-based captain deduction | A+=₹5L, A=₹2L, B/F=₹0 based on player category | Implemented (2-captain-system-02) |
+| Manual purse deduction with reason tracking | Audit trail for manual deductions, deferred logging to Phase 5 | Implemented (2-captain-system-03) |
+| Base prices configurable per category | Flexibility for future tournament changes | Implemented (2-captain-system-03) |
+| Team composition limits enforced (Male 7, Female 2, Total 8+1) | Ensure all teams can complete balanced roster | Implemented (2-captain-system-04) |
+| Auction eligibility filtering (no captains, no sold players) | Prevent ineligible players from being deployed | Implemented (2-captain-system-04) |
+| Server-side database functions for validation | Server-side validation prevents invalid database states | Implemented (2-captain-system-04) |
 
 ### Key Technical Decisions (from Research)
 
@@ -110,14 +117,19 @@
 - [x] Implement DATA-03: Max 9 players per team enforcement
 - [x] Implement ADMIN-01: Search functionality in Live Controller
 
-**Phase 2 (Next):**
-- [ ] Plan Phase 2: Captain System & Rules Configuration
-- [ ] Implement captain assignment workflow
-- [ ] Implement category-wise purse deduction
-- [ ] Implement team composition restrictions
-- [ ] Configure base prices and bid increments
+**Phase 2 (Completed):**
+- [x] Plan Phase 2: Captain System & Rules Configuration
+- [x] Implement CAPT-02: Add captain system database schema
+- [x] Implement CAPT-01: Create Captain Selection UI
+- [x] Implement CAPT-04: Automatic roster addition for captains
+- [x] Implement RULE-01: Manual purse deduction functionality
+- [x] Implement RULE-06: Team composition enforcement
+- [x] Implement LIFE-01: Auction eligibility filtering (captains)
+- [x] Implement LIFE-02: Auction eligibility filtering (sold players)
+- [x] Implement LIFE-03: Auction eligibility filtering (unsold only)
+- [x] Implement ADMIN-03: Simplified admin role system
 
-**Phase 3:**
+**Phase 3 (Next):**
 - [ ] Plan Phase 3: Live Auction Core
 - [ ] Implement timer management system
 - [ ] Implement auction flow orchestration
@@ -176,13 +188,13 @@
 
 ## Session Continuity
 
-**Last Action:** Completed Phase 1 with all 3 plans (Edit/Delete, CSV Import, Roster Limit, Live Controller Search)
+**Last Action:** Completed Phase 2 with all 4 plans (Captain System, Rules Configuration, Team Composition)
 
 **Next Actions:**
-1. Plan Phase 2 using `/gsd-plan-phase 2`
-2. Execute Phase 2 plans
-3. Validate Phase 2 success criteria
-4. Advance to Phase 3
+1. Validate Phase 2 success criteria
+2. Plan Phase 3 using `/gsd-plan-phase 3`
+3. Execute Phase 3 plans
+4. Advance to Phase 4
 
 **Context Preservation:**
 - All requirements mapped to phases in ROADMAP.md
@@ -191,4 +203,6 @@
 - Research findings preserved in research/SUMMARY.md
 
 ---
+
+*Last session:* 2026-03-06T05:58:00Z (Phase 2 completed)
 *State initialized: 2026-03-06*
