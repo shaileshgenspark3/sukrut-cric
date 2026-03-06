@@ -29,7 +29,10 @@
 4. System prevents adding more than 9 players to any team roster and shows clear error message
 5. Admin can search for players in Live Controller by name, category, role, or gender to select for auction
 
-**Plans:** TBD
+**Plans:** 3 plans (all in Wave 1)
+- [ ] 1-foundation-01-PLAN.md — Fix Edit/Delete functionality for teams and players (BUG-01, BUG-02)
+- [ ] 1-foundation-02-PLAN.md — Implement CSV import, erase all players, and fix global purse update (DATA-01, DATA-02, BUG-03)
+- [ ] 1-foundation-03-PLAN.md — Enforce roster limit and add Live Controller search (DATA-03, ADMIN-01)
 
 ---
 
@@ -128,7 +131,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Data Management | 0/3 | Not started | - |
+| 1. Foundation & Data Management | 0/3 | Planned | - |
 | 2. Captain System & Rules Configuration | 0/3 | Not started | - |
 | 3. Live Auction Core | 0/3 | Not started | - |
 | 4. Bid Validation & Enforcement | 0/2 | Not started | - |
