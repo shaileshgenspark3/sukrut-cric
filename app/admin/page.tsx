@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRealtimeSubscription } from '@/hooks/useRealtime';
 import { assignCaptain, removeCaptain } from '@/lib/actions/captains';
+import { manualPurseDeduction, updateBasePrices } from '@/lib/actions/rules';
 import {
     Loader2, LogOut, LayoutDashboard, Users, Gavel,
     Settings, ListPlus, PlayCircle, PauseCircle,
@@ -1702,6 +1703,19 @@ function RulesTab({ rules, settings }: any) {
     const queryClient = useQueryClient();
     const [globalPurse, setGlobalPurse] = useState(settings?.global_purse?.toString() || "30000");
 
+    // Manual deduction state
+    const [deductionTeamId, setDeductionTeamId] = useState("");
+    const [deductionAmount, setDeductionAmount] = useState("");
+    const [deductionReason, setDeductionReason] = useState("");
+
+    // Base prices state
+    const [basePrices, setBasePrices] = useState({
+        A_plus: settings?.base_price_A_plus?.toString() || "500000",
+        A: settings?.base_price_A?.toString() || "200000",
+        B: settings?.base_price_B?.toString() || "100000",
+        F: settings?.base_price_F?.toString() || "50000"
+    });
+
     const updateGlobalPurse = async () => {
         try {
             // Update tournament_settings
@@ -1731,6 +1745,48 @@ function RulesTab({ rules, settings }: any) {
     const updateDeduction = async (ruleId: string, val: string) => {
         await supabase.from("auction_rules").update({ captain_deduction: parseInt(val) || 0 }).eq("id", ruleId);
         queryClient.invalidateQueries({ queryKey: ["rules"] });
+    };
+
+    const handleManualDeduction = async () => {
+        if (!deductionTeamId || !deductionAmount || !deductionReason) {
+            alert("Please fill all fields");
+            return;
+        }
+
+        try {
+            const result = await manualPurseDeduction(
+                deductionTeamId,
+                parseInt(deductionAmount),
+                deductionReason
+            );
+            if (result.success) {
+                queryClient.invalidateQueries({ queryKey: ["rules"] });
+                alert(`Deduction successful. New purse: ₹${result.newPurse?.toLocaleString()}`);
+                // Reset form
+                setDeductionTeamId("");
+                setDeductionAmount("");
+                setDeductionReason("");
+            }
+        } catch (err: any) {
+            alert("Error processing deduction: " + err.message);
+        }
+    };
+
+    const handleUpdateBasePrices = async () => {
+        try {
+            const result = await updateBasePrices({
+                A_plus: parseInt(basePrices.A_plus),
+                A: parseInt(basePrices.A),
+                B: parseInt(basePrices.B),
+                F: parseInt(basePrices.F)
+            });
+            if (result.success) {
+                queryClient.invalidateQueries({ queryKey: ["settings"] });
+                alert("Base prices updated successfully!");
+            }
+        } catch (err: any) {
+            alert("Error updating base prices: " + err.message);
+        }
     };
 
     return (
@@ -1767,6 +1823,89 @@ function RulesTab({ rules, settings }: any) {
                 </div>
             </div>
 
+
+            {/* Manual Purse Deduction */}
+            <div className="glass-card bg-slate-900/60 p-6 rounded-[2rem] border-white/5">
+                <h3 className="text-sm font-display font-black text-destructive tracking-[0.2em] mb-4 uppercase">Manual Purse Deduction</h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                        <label className="text-[10px] text-slate-500 font-black tracking-[0.3em] mb-2 block uppercase">Team</label>
+                        <select
+                            value={deductionTeamId}
+                            onChange={e => setDeductionTeamId(e.target.value)}
+                            className="w-full bg-slate-950/80 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-destructive transition-all"
+                        >
+                            <option value="">Select team</option>
+                            {rules?.map((r: any) => (
+                                <option key={r.team_id} value={r.team_id}>
+                                    {r.team?.team_name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] text-slate-500 font-black tracking-[0.3em] mb-2 block uppercase">Amount</label>
+                        <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-destructive font-bold text-sm">-₹</span>
+                            <input
+                                type="number"
+                                value={deductionAmount}
+                                onChange={e => setDeductionAmount(e.target.value)}
+                                placeholder="0"
+                                className="w-full bg-slate-950/80 border border-white/5 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:border-destructive transition-all"
+                            />
+                        </div>
+                    </div>
+                    <div className="md:col-span-2">
+                        <label className="text-[10px] text-slate-500 font-black tracking-[0.3em] mb-2 block uppercase">Reason</label>
+                        <input
+                            type="text"
+                            value={deductionReason}
+                            onChange={e => setDeductionReason(e.target.value)}
+                            placeholder="Reason for deduction"
+                            className="w-full bg-slate-950/80 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-white/20 transition-all"
+                        />
+                    </div>
+                </div>
+                <button
+                    onClick={handleManualDeduction}
+                    className="mt-4 bg-destructive hover:bg-destructive/90 text-white font-display font-black text-xs tracking-widest px-6 rounded-xl h-[42px] shadow-[0_4px_15px_rgba(239,68,68,0.2)] transition-all hover:scale-105 active:scale-95 uppercase"
+                >
+                    Apply Deduction
+                </button>
+            </div>
+
+            {/* Base Price Configuration */}
+            <div className="glass-card bg-slate-900/60 p-6 rounded-[2rem] border-white/5">
+                <h3 className="text-sm font-display font-black text-gold tracking-[0.2em] mb-4 uppercase">Category Base Prices</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                        { key: "A_plus", label: "A+ Category", default: "500000" },
+                        { key: "A", label: "A Category", default: "200000" },
+                        { key: "B", label: "B Category", default: "100000" },
+                        { key: "F", label: "F Category", default: "50000" }
+                    ].map((category) => (
+                        <div key={category.key}>
+                            <label className="text-[10px] text-slate-500 font-black tracking-[0.3em] mb-2 block uppercase">{category.label}</label>
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gold font-display font-black text-sm">₹</span>
+                                <input
+                                    type="number"
+                                    value={basePrices[category.key as keyof typeof basePrices]}
+                                    onChange={e => setBasePrices({ ...basePrices, [category.key]: e.target.value })}
+                                    className="w-full bg-slate-950/80 border border-white/5 rounded-xl pl-10 pr-4 py-3 font-display font-black text-white outline-none focus:border-gold/30 transition-all"
+                                />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                <button
+                    onClick={handleUpdateBasePrices}
+                    className="mt-4 bg-gold hover:bg-gold/90 text-black font-display font-black text-xs tracking-widest px-6 rounded-xl h-[42px] shadow-[0_4px_15px_rgba(255,215,0,0.2)] transition-all hover:scale-105 active:scale-95 uppercase"
+                >
+                    Update Base Prices
+                </button>
+            </div>
             <div className="glass-card rounded-[2.5rem] border-white/5 overflow-hidden">
                 <table className="w-full text-left text-sm whitespace-nowrap">
                     <thead className="bg-slate-950/80 backdrop-blur-xl border-b border-white/5">
@@ -1775,7 +1914,7 @@ function RulesTab({ rules, settings }: any) {
                             <th className="px-4 py-5">Commanding Officer</th>
                             <th className="px-4 py-5">Base Resource</th>
                             <th className="px-4 py-5">Officer Deduction</th>
-                            <th className="px-8 py-5 text-right">Available Start Balance</th>
+                            <th className="px-8 py-5 text-right">Current Purse</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -1799,7 +1938,7 @@ function RulesTab({ rules, settings }: any) {
                                 </td>
                                 <td className="px-8 py-6 text-right">
                                     <div className="text-xl font-display font-black text-accent tracking-tighter glow-gold">
-                                        ₹{(r.starting_purse - r.captain_deduction).toLocaleString()}
+                                        ₹{r.current_purse.toLocaleString()}
                                     </div>
                                 </td>
                             </tr>
