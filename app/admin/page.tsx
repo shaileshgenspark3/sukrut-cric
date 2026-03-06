@@ -83,12 +83,44 @@ export default function AdminDashboard() {
         router.push("/");
     };
 
+    const handleDeleteConfirm = async () => {
+        if (!deleteConfirm) return;
+
+        try {
+            if (deleteConfirm.type === 'captain') {
+                // Delete auction rules first (foreign key)
+                await supabase.from('auction_rules').delete().eq('team_id', deleteConfirm.id);
+                // Delete team
+                await supabase.from('teams').delete().eq('id', deleteConfirm.id);
+                // Note: Auth user is not deleted (security consideration)
+            } else if (deleteConfirm.type === 'player') {
+                await supabase.from('players').delete().eq('id', deleteConfirm.id);
+            }
+            queryClient.invalidateQueries({ queryKey: ['teams'] });
+            queryClient.invalidateQueries({ queryKey: ['players'] });
+            setDeleteConfirm(null);
+        } catch (err: any) {
+            alert('Delete failed: ' + err.message);
+        }
+    };
+
     const tabs = [
         { id: "dashboard", label: "Overview", icon: LayoutDashboard },
         { id: "players", label: "Players", icon: Users },
         { id: "rules", label: "Auction Rules", icon: Settings },
         { id: "live", label: "Live Controller", icon: Gavel, requiresCore: true }
     ];
+
+    // Modal props for child components
+    const modalProps = {
+        setShowAddCaptain,
+        setShowEditCaptain,
+        setShowAddPlayer,
+        setShowEditPlayer,
+        setSelectedCaptain,
+        setSelectedPlayer,
+        setDeleteConfirm
+    };
 
     if (!userId) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
@@ -154,11 +186,40 @@ export default function AdminDashboard() {
 
             {/* Main Content */}
             <main className="flex-1 p-6 md:p-8 overflow-y-auto">
-                {activeTab === "dashboard" && <OverviewTab teams={teams} players={players} settings={settings} />}
-                {activeTab === "players" && <PlayersTab players={players} />}
+                {activeTab === "dashboard" && <OverviewTab teams={teams} players={players} settings={settings} {...modalProps} />}
+                {activeTab === "players" && <PlayersTab players={players} {...modalProps} />}
                 {activeTab === "rules" && <RulesTab rules={rules} settings={settings} />}
                 {activeTab === "live" && <LiveControllerTab auctionState={auctionState} settings={settings} players={players} />}
             </main>
+
+            {/* Modals */}
+            <EditCaptainModal
+                show={showEditCaptain}
+                onClose={() => setShowEditCaptain(false)}
+                captain={selectedCaptain}
+                onSuccess={() => {
+                    queryClient.invalidateQueries({ queryKey: ['teams'] });
+                    setSelectedCaptain(null);
+                }}
+            />
+
+            <EditPlayerModal
+                show={showEditPlayer}
+                onClose={() => setShowEditPlayer(false)}
+                player={selectedPlayer}
+                onSuccess={() => {
+                    queryClient.invalidateQueries({ queryKey: ['players'] });
+                    setSelectedPlayer(null);
+                }}
+            />
+
+            <ConfirmDeleteModal
+                show={!!deleteConfirm}
+                onClose={() => setDeleteConfirm(null)}
+                onConfirm={handleDeleteConfirm}
+                type={deleteConfirm?.type}
+                name={deleteConfirm?.name}
+            />
         </div>
     );
 }
@@ -1183,7 +1244,10 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                                         <td className="px-4 py-4">
                                             <div className="flex gap-2">
                                                 <button
-                                                    onClick={() => modalProps.setSelectedCaptain(t)}
+                                                    onClick={() => {
+                                                        modalProps.setSelectedCaptain(t);
+                                                        modalProps.setShowEditCaptain?.(true);
+                                                    }}
                                                     className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors"
                                                     title="Edit Captain"
                                                 >
@@ -1453,7 +1517,10 @@ function PlayersTab({ players, ...modalProps }: any) {
                                     <td className="px-2 py-4">
                                         <div className="flex gap-2">
                                             <button
-                                                onClick={() => modalProps.setSelectedPlayer(p)}
+                                                onClick={() => {
+                                                    modalProps.setSelectedPlayer(p);
+                                                    modalProps.setShowEditPlayer?.(true);
+                                                }}
                                                 className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors"
                                                 title="Edit Player"
                                             >
