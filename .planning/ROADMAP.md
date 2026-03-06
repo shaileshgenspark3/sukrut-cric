@@ -53,7 +53,11 @@
 6. Team composition restrictions are enforced (Male: A+=1, A=3, B=4; Female: F=1; Total: 1 captain + 8 players)
 7. System uses simplified Core Admin role only, and all admin operations work correctly
 
-**Plans:** TBD
+**Plans:** 4 plans (Wave 1: 1 plan, Wave 2: 2 plans, Wave 3: 1 plan)
+- [ ] 2-captain-system-01-PLAN.md — Add database schema for captain system, base prices, and simplified admin roles (CAPT-02, RULE-01, RULE-06, ADMIN-03)
+- [ ] 2-captain-system-02-PLAN.md — Create Captain Selection UI with dropdown assignment and automatic roster addition (CAPT-01, CAPT-02, CAPT-04, LIFE-03)
+- [ ] 2-captain-system-03-PLAN.md — Add manual purse deduction and base price configuration to Rules tab (CAPT-05, RULE-01)
+- [ ] 2-captain-system-04-PLAN.md — Enforce team composition rules and prevent ineligible players from auction deployment (RULE-06, LIFE-01, LIFE-02, LIFE-03)
 
 ---
 
@@ -132,7 +136,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Data Management | 0/3 | Planned | - |
-| 2. Captain System & Rules Configuration | 0/3 | Not started | - |
+| 2. Captain System & Rules Configuration | 0/4 | Planned | - |
 | 3. Live Auction Core | 0/3 | Not started | - |
 | 4. Bid Validation & Enforcement | 0/2 | Not started | - |
 | 5. Logging, Manual Sales & Data Integrity | 0/3 | Not started | - |
