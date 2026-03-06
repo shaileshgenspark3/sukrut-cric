@@ -7,7 +7,7 @@
 ## Phases
 
 - [x] **Phase 1: Foundation & Data Management** - Bug fixes, player data management, admin controls ✓
-- [ ] **Phase 2: Captain System & Rules Configuration** - Captain assignment, team composition rules, purse management
+- [x] **Phase 2: Captain System & Rules Configuration** - Captain assignment, team composition rules, purse management ✓
 - [ ] **Phase 3: Live Auction Core** - Timer system, auction flow, player display, bid history
 - [ ] **Phase 4: Bid Validation & Enforcement** - Max bid calculations, category restrictions, eligibility checks
 - [ ] **Phase 5: Logging, Manual Sales & Data Integrity** - Auction logs, reverse sales, CSV operations, admin workflows
@@ -54,10 +54,10 @@
 7. System uses simplified Core Admin role only, and all admin operations work correctly
 
 **Plans:** 4 plans (Wave 1: 1 plan, Wave 2: 2 plans, Wave 3: 1 plan)
-- [ ] 2-captain-system-01-PLAN.md — Add database schema for captain system, base prices, and simplified admin roles (CAPT-02, RULE-01, RULE-06, ADMIN-03)
-- [ ] 2-captain-system-02-PLAN.md — Create Captain Selection UI with dropdown assignment and automatic roster addition (CAPT-01, CAPT-02, CAPT-04, LIFE-03)
-- [ ] 2-captain-system-03-PLAN.md — Add manual purse deduction and base price configuration to Rules tab (CAPT-05, RULE-01)
-- [ ] 2-captain-system-04-PLAN.md — Enforce team composition rules and prevent ineligible players from auction deployment (RULE-06, LIFE-01, LIFE-02, LIFE-03)
+- [x] 2-captain-system-01-PLAN.md — Add database schema for captain system, base prices, and simplified admin roles (CAPT-02, RULE-01, RULE-06, ADMIN-03) ✓
+- [x] 2-captain-system-02-PLAN.md — Create Captain Selection UI with dropdown assignment and automatic roster addition (CAPT-01, CAPT-02, CAPT-04, LIFE-03) ✓
+- [x] 2-captain-system-03-PLAN.md — Add manual purse deduction and base price configuration to Rules tab (CAPT-05, RULE-01) ✓
+- [x] 2-captain-system-04-PLAN.md — Enforce team composition rules and prevent ineligible players from auction deployment (RULE-06, LIFE-01, LIFE-02, LIFE-03) ✓
 
 ---
 
