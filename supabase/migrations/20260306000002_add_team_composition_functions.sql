@@ -23,20 +23,30 @@ BEGIN
   WHERE sold_to_team_id = p_team_id AND is_captain = FALSE;
 
   -- Count by gender
-  SELECT
-    COUNT(*) FILTER (WHERE gender = 'Male') INTO v_male_count,
-    COUNT(*) FILTER (WHERE gender = 'Female') INTO v_female_count
+  SELECT COUNT(*) INTO v_male_count
   FROM players
-  WHERE sold_to_team_id = p_team_id AND is_captain = FALSE;
+  WHERE sold_to_team_id = p_team_id AND is_captain = FALSE AND gender = 'Male';
+
+  SELECT COUNT(*) INTO v_female_count
+  FROM players
+  WHERE sold_to_team_id = p_team_id AND is_captain = FALSE AND gender = 'Female';
 
   -- Count by category
-  SELECT
-    COUNT(*) FILTER (WHERE category = 'A+') INTO v_a_plus_count,
-    COUNT(*) FILTER (WHERE category = 'A') INTO v_a_count,
-    COUNT(*) FILTER (WHERE category = 'B') INTO v_b_count,
-    COUNT(*) FILTER (WHERE category = 'F') INTO v_f_count
+  SELECT COUNT(*) INTO v_a_plus_count
   FROM players
-  WHERE sold_to_team_id = p_team_id AND is_captain = FALSE;
+  WHERE sold_to_team_id = p_team_id AND is_captain = FALSE AND category = 'A+';
+
+  SELECT COUNT(*) INTO v_a_count
+  FROM players
+  WHERE sold_to_team_id = p_team_id AND is_captain = FALSE AND category = 'A';
+
+  SELECT COUNT(*) INTO v_b_count
+  FROM players
+  WHERE sold_to_team_id = p_team_id AND is_captain = FALSE AND category = 'B';
+
+  SELECT COUNT(*) INTO v_f_count
+  FROM players
+  WHERE sold_to_team_id = p_team_id AND is_captain = FALSE AND category = 'F';
 
   -- Count captains
   SELECT COUNT(*) INTO v_captain_count

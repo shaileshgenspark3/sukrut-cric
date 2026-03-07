@@ -70,6 +70,13 @@ export async function placeBidWithValidation(
       throw new Error("This player is not currently on the auction block");
     }
 
+    if (auctionState.timer_end && !auctionState.is_paused) {
+      const timerExpired = new Date(auctionState.timer_end).getTime() <= Date.now();
+      if (timerExpired) {
+        throw new Error("Timer expired. Waiting for admin confirmation before continuing.");
+      }
+    }
+
     const currentBidAmount = auctionState.current_bid_amount || auctionState.current_base_price || 0;
     const bidIncrement = 25000;
     const expectedBid = currentBidAmount + bidIncrement;

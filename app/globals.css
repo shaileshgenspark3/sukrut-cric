@@ -158,3 +158,19 @@
 ::-webkit-scrollbar-thumb {
   @apply bg-slate-800 rounded-full hover:bg-slate-700 transition-colors;
 }
+.sales-ticker-track {
+  animation: sales-ticker 35s linear infinite;
+}
+
+.sales-ticker-track:hover {
+  animation-play-state: paused;
+}
+
+@keyframes sales-ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}

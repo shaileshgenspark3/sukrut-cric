@@ -18,8 +18,19 @@ import confetti from 'canvas-confetti';
 import { PlayerCard } from '@/components/admin/PlayerCard';
 import { useBids } from '@/hooks/useBids';
 import { BidHistory } from '@/components/admin/BidHistory';
-import { calculateMaxBid, getTeamEligibility, checkCategoryEligibility } from '@/lib/validation/bidValidation';
+import { getTeamEligibility, checkCategoryEligibility } from '@/lib/validation/bidValidation';
 import { placeBidWithValidation } from '@/lib/actions/bids';
+
+type SponsorTriggerStatus = 'sold' | 'unsold';
+
+interface AuctionPlayerSnapshot {
+    id: string;
+    name: string;
+    category?: string | null;
+    playing_role?: string | null;
+    image_url?: string | null;
+    sold_price?: number | null;
+}
 
 export default function CaptainDashboard() {
     const router = useRouter();
@@ -44,7 +55,9 @@ export default function CaptainDashboard() {
     useRealtimeSubscription('auction_state', ['auction_state']);
     useRealtimeSubscription('auction_rules', ['rules', userId!]);
     useRealtimeSubscription('players', ['team_roster', userId!]);
+    useRealtimeSubscription('players', ['sold_player_count']);
     useRealtimeSubscription('teams', ['team_details', userId!]);
+    useRealtimeSubscription('auction_log', ['captain_latest_outcome']);
 
 
     const { data: team } = useQuery({
@@ -74,12 +87,51 @@ export default function CaptainDashboard() {
         }
     });
 
+    const { data: soldPlayerCountFallback = 0 } = useQuery({
+        queryKey: ['sold_player_count'],
+        queryFn: async () => {
+            const { count, error } = await supabase
+                .from('players')
+                .select('*', { count: 'exact', head: true })
+                .eq('is_sold', true);
+
+            if (error) {
+                console.error('Failed to fetch sold player count:', error);
+                return 0;
+            }
+
+            return count || 0;
+        }
+    });
+
     const { data: auctionState } = useQuery({
         queryKey: ['auction_state'],
         queryFn: async () => {
             const { data } = await supabase.from('auction_state').select('*, current_player:players(*), current_bidder:teams(*)').single();
             return data;
         }
+    });
+
+    const { data: latestAuctionOutcome } = useQuery({
+        queryKey: ['captain_latest_outcome'],
+        queryFn: async () => {
+            const { data } = await supabase
+                .from('auction_log')
+                .select(`
+                    id,
+                    status,
+                    sale_price,
+                    logged_at,
+                    player:players(id, name, image_url, category, playing_role),
+                    team:teams(team_name, captain_name, captain_image_url)
+                `)
+                .eq('deleted', false)
+                .in('status', ['sold', 'unsold'])
+                .order('logged_at', { ascending: false })
+                .limit(1)
+                .single();
+            return data;
+        },
     });
 
     const { data: roster } = useQuery({
@@ -106,11 +158,13 @@ export default function CaptainDashboard() {
     const currentBid = auctionState?.current_bid || 0;
     const increment = auctionState?.bid_increment || 100;
     const nextBid = currentBid + increment;
+    const soldPlayerCount = soldPlayerCountFallback;
 
     const isAuctionLive = settings?.is_auction_live;
     const isPlayerOnBlock = (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid') && auctionState?.current_player;
     const isHighestBidder = auctionState?.current_bidder_team_id === team?.id;
     const playerGender = auctionState?.current_player?.gender;
+    const currentPlayerId = auctionState?.current_player?.id || null;
 
     // Timer hook for countdown display
     const { totalSeconds, isPaused, isRunning } = useTimer();
@@ -124,6 +178,12 @@ export default function CaptainDashboard() {
     const [maxBid, setMaxBid] = useState(0);
     const [bidEligibility, setBidEligibility] = useState<{ canBid: boolean; reasons: string[] }>({ canBid: true, reasons: [] });
     const [categoryEligibility, setCategoryEligibility] = useState<{ eligible: boolean; reason?: string }>({ eligible: true });
+    const [maxBidNoteDismissedForPlayerId, setMaxBidNoteDismissedForPlayerId] = useState<string | null>(null);
+    const [pauseSponsorDismissedForPlayerId, setPauseSponsorDismissedForPlayerId] = useState<string | null>(null);
+    const [dismissedSponsorTriggerKey, setDismissedSponsorTriggerKey] = useState<string | null>(null);
+    const [sponsorPopoutNow, setSponsorPopoutNow] = useState(() => Date.now());
+    const isMaxBidNoteDismissed = !!currentPlayerId && maxBidNoteDismissedForPlayerId === currentPlayerId;
+    const isPauseSponsorDismissed = !!currentPlayerId && pauseSponsorDismissedForPlayerId === currentPlayerId;
 
     useEffect(() => {
         const fetchMaxBid = async () => {
@@ -155,6 +215,35 @@ export default function CaptainDashboard() {
 
         fetchMaxBid();
     }, [team?.id, auctionState?.current_player?.id, auctionState?.current_bid]);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setSponsorPopoutNow(Date.now());
+        }, 500);
+
+        return () => clearInterval(interval);
+    }, []);
+
+    const sponsorTriggerStatus: SponsorTriggerStatus | null =
+        latestAuctionOutcome?.status === 'sold' || latestAuctionOutcome?.status === 'unsold'
+            ? latestAuctionOutcome.status
+            : null;
+    const sponsorTriggerPlayer = (Array.isArray(latestAuctionOutcome?.player) ? latestAuctionOutcome?.player[0] : latestAuctionOutcome?.player) as AuctionPlayerSnapshot | undefined;
+    const sponsorTriggerTeam = Array.isArray(latestAuctionOutcome?.team) ? latestAuctionOutcome?.team[0] : latestAuctionOutcome?.team;
+    const sponsorTriggerBidAmount = latestAuctionOutcome?.sale_price || sponsorTriggerPlayer?.sold_price || null;
+    const sponsorTriggerKey = sponsorTriggerStatus && latestAuctionOutcome?.id
+        ? `${sponsorTriggerStatus}-${latestAuctionOutcome.id}`
+        : null;
+    const sponsorTriggerTime = latestAuctionOutcome?.logged_at ? new Date(latestAuctionOutcome.logged_at).getTime() : 0;
+    const isSponsorInDisplayWindow = sponsorTriggerTime > 0 && (sponsorPopoutNow - sponsorTriggerTime) < 5000;
+    const shouldShowSponsorPopout = Boolean(
+        settings?.sponsor_image_url &&
+        sponsorTriggerStatus &&
+        sponsorTriggerPlayer?.id &&
+        sponsorTriggerKey &&
+        isSponsorInDisplayWindow &&
+        dismissedSponsorTriggerKey !== sponsorTriggerKey
+    );
 
     const [showVictory, setShowVictory] = useState(false);
 
@@ -415,6 +504,29 @@ export default function CaptainDashboard() {
                                         <p className="uppercase text-[10px] tracking-[0.4em] font-black">Base Value: ₹{auctionState.current_player?.base_price.toLocaleString()}</p>
                                         <div className="h-px w-8 bg-white/5" />
                                     </div>
+
+                                    {settings?.sponsor_image_url && isPaused && isPlayerOnBlock && !isPauseSponsorDismissed && (
+                                        <div className="mt-6 w-full max-w-md bg-slate-950/70 border border-gold/20 rounded-2xl p-4">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gold">Sponsor</p>
+                                                <button
+                                                    onClick={() => {
+                                                        if (currentPlayerId) setPauseSponsorDismissedForPlayerId(currentPlayerId);
+                                                    }}
+                                                    className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-400 hover:text-white transition-colors"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                            <div className="rounded-xl overflow-hidden border border-white/10 bg-slate-950/80 p-2">
+                                                <img
+                                                    src={settings.sponsor_image_url}
+                                                    alt="Sponsor"
+                                                    className="w-full h-24 object-contain"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="w-full lg:w-3/5 flex flex-col h-full justify-center">
@@ -499,7 +611,7 @@ export default function CaptainDashboard() {
                                     </button>
 
                                     {/* Max Bid Display */}
-                                    {isPlayerOnBlock && maxBid > 0 && (
+                                    {isPlayerOnBlock && maxBid > 0 && soldPlayerCount > 85 && (
                                         <div className={`mt-4 p-4 rounded-2xl text-center ${nextBid > maxBid ? 'bg-destructive/10 border border-destructive/30' : 'bg-primary/10 border border-primary/30'}`}>
                                             <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400 mb-1">Your Maximum Bid</p>
                                             <p className={`font-display font-black text-2xl ${nextBid > maxBid ? 'text-destructive' : 'text-primary'}`}>
@@ -509,6 +621,22 @@ export default function CaptainDashboard() {
                                                 <p className="text-destructive text-xs mt-2 font-medium">
                                                     Bid exceeds your maximum
                                                 </p>
+                                            )}
+
+                                            {!isMaxBidNoteDismissed && (
+                                                <div className="mt-3 pt-3 border-t border-white/10">
+                                                    <p className="text-xs text-slate-300 italic leading-relaxed">
+                                                        {"Don't worry, you can only see this max bid amount, no other captain or other can see this amount."}
+                                                    </p>
+                                                    <button
+                                                        onClick={() => {
+                                                            if (currentPlayerId) setMaxBidNoteDismissedForPlayerId(currentPlayerId);
+                                                        }}
+                                                        className="mt-2 text-[10px] uppercase tracking-[0.2em] font-black text-slate-400 hover:text-white transition-colors"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
                                     )}
@@ -594,6 +722,71 @@ export default function CaptainDashboard() {
             </main>
 
             <AnimatePresence>
+                {shouldShowSponsorPopout && sponsorTriggerStatus && sponsorTriggerPlayer && settings?.sponsor_image_url && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 20, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 20, scale: 0.98 }}
+                        className="fixed bottom-6 right-6 z-[95] w-[360px] bg-slate-950/95 border border-gold/30 rounded-3xl p-5 shadow-[0_20px_70px_rgba(0,0,0,0.65)]"
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gold">
+                                {sponsorTriggerStatus === 'sold' ? 'Sold Trigger' : 'Unsold Trigger'}
+                            </p>
+                            <button
+                                onClick={() => setDismissedSponsorTriggerKey(sponsorTriggerKey)}
+                                className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-400 hover:text-white transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+
+                        <div className="rounded-2xl overflow-hidden border border-white/10 bg-slate-900/70 p-2 mb-4">
+                            <img
+                                src={settings.sponsor_image_url}
+                                alt="Sponsor"
+                                className="w-full h-24 object-contain"
+                            />
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            <img
+                                src={sponsorTriggerPlayer.image_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sponsorTriggerPlayer.name || 'player'}`}
+                                alt={sponsorTriggerPlayer.name || 'Player'}
+                                className="w-14 h-14 rounded-2xl object-cover border border-white/10 bg-slate-900"
+                            />
+                            <div className="min-w-0">
+                                <p className="text-white font-display font-black tracking-wide uppercase truncate">
+                                    {sponsorTriggerPlayer.name}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">
+                                    {sponsorTriggerPlayer.category} Tier • {sponsorTriggerPlayer.playing_role}
+                                </p>
+                                {sponsorTriggerStatus === 'sold' && sponsorTriggerBidAmount && (
+                                    <p className="text-sm text-gold font-display font-black mt-1">
+                                        ₹{sponsorTriggerBidAmount.toLocaleString()}
+                                    </p>
+                                )}
+                                {sponsorTriggerStatus === 'sold' && sponsorTriggerTeam?.team_name && (
+                                    <div className="mt-1 flex items-center gap-2">
+                                        <p className="text-[11px] text-slate-300">
+                                            {sponsorTriggerTeam.team_name}
+                                            {sponsorTriggerTeam.captain_name ? ` • ${sponsorTriggerTeam.captain_name}` : ''}
+                                        </p>
+                                        {sponsorTriggerTeam.captain_image_url ? (
+                                            <img
+                                                src={sponsorTriggerTeam.captain_image_url}
+                                                alt={sponsorTriggerTeam.captain_name || 'Captain'}
+                                                className="w-5 h-5 rounded-full border border-white/10 object-cover"
+                                            />
+                                        ) : null}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+
                 {showVictory && (
                     <motion.div
                         initial={{ opacity: 0 }}

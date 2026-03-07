@@ -12,7 +12,14 @@ export const PlayerCSVSchema = z.object({
   'Special Remarks': z.string().optional(),
   'Combat Role': z.enum(['Batsman', 'Bowler', 'All-rounder', 'Wicket-keeper']).default('Batsman'),
   'Variant': z.enum(['Male', 'Female']).default('Male'),
-  'Market Base': z.coerce.number().int().min(100).default(1000)
+  'Market Base': z.coerce.number().int().min(100).default(1000),
+  'Phone Number': z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || '')
+    .refine((value) => value === '' || /^\d{10}$/.test(value), {
+      message: 'Phone Number must be exactly 10 digits',
+    }),
 });
 
 export type PlayerCSVRow = z.infer<typeof PlayerCSVSchema>;

@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  FileText, Download, Trash2, Calendar,
+  FileText, Download, Trash2,
   Filter, Search, ChevronDown, Shield, X,
-  Users, DollarSign, AlertCircle, CheckCircle
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -24,18 +24,30 @@ interface AuctionLog {
   is_manual: boolean;
   deleted: boolean;
   deleted_at: string | null;
-  player: {
-    id: string;
-    name: string;
-    category: string;
-    image_url: string;
-    playing_role: string;
-  } | null;
-  team: {
-    id: string;
-    team_name: string;
-    team_logo_url: string;
-  } | null;
+  player: AuctionLogPlayer | null;
+  team: AuctionLogTeam | null;
+}
+
+interface AuctionLogPlayer {
+  id: string;
+  name: string;
+  category: string;
+  age?: number | null;
+  handy?: string | null;
+  phone_number?: string | null;
+  image_url: string;
+  playing_role: string;
+}
+
+interface AuctionLogTeam {
+  id: string;
+  team_name: string;
+  team_logo_url: string;
+}
+
+interface AuctionLogSourceRow extends Omit<AuctionLog, 'player' | 'team'> {
+  player: AuctionLogPlayer | AuctionLogPlayer[] | null;
+  team: AuctionLogTeam | AuctionLogTeam[] | null;
 }
 
 interface DeleteConfirmationState {
@@ -46,13 +58,53 @@ interface DeleteConfirmationState {
   reason: string;
 }
 
+interface TeamFormationRow {
+  teamId: string;
+  teamName: string;
+  captainName: string | null;
+  teamLogoUrl: string | null;
+  captainImageUrl: string | null;
+  category: string;
+  playerName: string;
+  bidAmount: number;
+  age: number | null;
+  handy: string | null;
+  phoneNumber: string | null;
+}
+
+interface TeamFormationSourceRow {
+  id: string;
+  name: string | null;
+  category: string | null;
+  age: number | null;
+  handy: string | null;
+  phone_number: string | null;
+  sold_price: number | null;
+  sold_to_team_id: string | null;
+  team:
+    | { id: string; team_name: string; captain_name: string | null; team_logo_url: string | null; captain_image_url: string | null }
+    | { id: string; team_name: string; captain_name: string | null; team_logo_url: string | null; captain_image_url: string | null }[]
+    | null;
+}
+
+const EXPORT_RUNNING_MESSAGE = "It may take a little time, so wait for all the files to be downloaded and then proceed with the auction.";
+
+function unwrapRelation<T,>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  if (Array.isArray(value)) {
+    return value[0] || null;
+  }
+  return value;
+}
+
 export function AuctionLogs() {
   const queryClient = useQueryClient();
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<AuctionLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'sold' | 'unsold' | 'manual'>('all');
   const [showExportModal, setShowExportModal] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmationState>({
     show: false,
     logId: null,
@@ -61,7 +113,7 @@ export function AuctionLogs() {
     reason: '',
   });
 
-  const { data: allLogs, isLoading } = useQuery({
+  const { data: allLogs } = useQuery({
     queryKey: ['auction_logs'],
     queryFn: async () => {
       const { data } = await supabase
@@ -80,11 +132,16 @@ export function AuctionLogs() {
           is_manual,
           deleted,
           deleted_at,
-          player:players(id, name, category, image_url, playing_role),
+          player:players(id, name, category, age, handy, phone_number, image_url, playing_role),
           team:teams(id, team_name, team_logo_url)
         `)
         .order('logged_at', { ascending: false });
-      return data || [];
+      const sourceLogs = (data || []) as AuctionLogSourceRow[];
+      return sourceLogs.map((log) => ({
+        ...log,
+        player: unwrapRelation(log.player),
+        team: unwrapRelation(log.team),
+      }));
     },
   });
 
@@ -96,10 +153,10 @@ export function AuctionLogs() {
         }
         if (searchTerm) {
           const searchLower = searchTerm.toLowerCase();
-          const playerObj = log.player as any;
-          const teamObj = log.team as any;
-          const playerName = Array.isArray(playerObj) ? playerObj[0]?.name : playerObj?.name;
-          const teamName = Array.isArray(teamObj) ? teamObj[0]?.team_name : teamObj?.team_name;
+          const playerObj = unwrapRelation(log.player);
+          const teamObj = unwrapRelation(log.team);
+          const playerName = playerObj?.name;
+          const teamName = teamObj?.team_name;
           return (
             (playerName?.toLowerCase().includes(searchLower) || false) ||
             (teamName?.toLowerCase().includes(searchLower) || false)
@@ -126,26 +183,483 @@ export function AuctionLogs() {
     },
   });
 
+  const triggerDataUrlDownload = (dataUrl: string, fileName: string) => {
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const waitForDownloadQueue = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  };
+
+  const exportLogEntriesWorkbook = async () => {
+    const sourceLogs = allLogs || [];
+    if (sourceLogs.length === 0) {
+      throw new Error('No log entries found to export.');
+    }
+
+    const { utils, writeFile } = await import('xlsx');
+
+    const rows = sourceLogs.map((log) => {
+      const player = unwrapRelation(log.player);
+      const team = unwrapRelation(log.team);
+
+      return {
+        'Player Name': player?.name || 'N/A',
+        Team: team?.team_name || 'Unsold',
+        Status: log.status,
+        'Sale Price': log.sale_price ?? 0,
+        'Base Price': log.base_price,
+        'Bid Count': log.bid_count,
+        Category: log.category,
+        Gender: log.gender,
+        'Logged At': new Date(log.logged_at).toLocaleString(),
+        'Manual Sale': log.is_manual ? 'Yes' : 'No',
+        Deleted: log.deleted ? 'Yes' : 'No',
+        'Deleted At': log.deleted_at ? new Date(log.deleted_at).toLocaleString() : '-',
+      };
+    });
+
+    const workbook = utils.book_new();
+    const worksheet = utils.json_to_sheet(rows);
+    worksheet['!cols'] = [
+      { wch: 28 },
+      { wch: 24 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 22 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 22 },
+    ];
+
+    utils.book_append_sheet(workbook, worksheet, 'Log Entries');
+    writeFile(workbook, 'LOG_ENTRIES.xlsx');
+    await waitForDownloadQueue();
+  };
+
+  const fetchTeamFormationRows = async (): Promise<TeamFormationRow[]> => {
+    const { data, error } = await supabase
+      .from('players')
+      .select(`
+        id,
+        name,
+        category,
+        age,
+        handy,
+        phone_number,
+        sold_price,
+        sold_to_team_id,
+        team:teams(id, team_name, captain_name, team_logo_url, captain_image_url)
+      `)
+      .eq('is_sold', true)
+      .not('sold_to_team_id', 'is', null)
+      .order('name', { ascending: true });
+
+    if (error) {
+      throw new Error(`Failed to fetch team formation data: ${error.message}`);
+    }
+
+    const sourceRows = (data || []) as TeamFormationSourceRow[];
+    const rows = sourceRows.map((entry) => {
+      const team = unwrapRelation<{
+        id: string;
+        team_name: string;
+        captain_name: string | null;
+        team_logo_url: string | null;
+        captain_image_url: string | null;
+      }>(entry.team);
+
+      return {
+        teamId: team?.id || entry.sold_to_team_id || 'unknown-team',
+        teamName: team?.team_name || 'Unknown Team',
+        captainName: team?.captain_name || null,
+        teamLogoUrl: team?.team_logo_url || null,
+        captainImageUrl: team?.captain_image_url || null,
+        category: entry.category || '-',
+        playerName: entry.name || '-',
+        bidAmount: entry.sold_price || 0,
+        age: typeof entry.age === 'number' ? entry.age : null,
+        handy: entry.handy || null,
+        phoneNumber: entry.phone_number || null,
+      };
+    });
+
+    return rows;
+  };
+
+  const exportTeamFormationPdf = async () => {
+    const rows = await fetchTeamFormationRows();
+    const { jsPDF } = await import('jspdf');
+
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+      unit: 'pt',
+      format: 'a4',
+    });
+
+    const columns = ['Category', 'Player Name', 'Bid Amount', 'Age', 'Handy', 'Phone Number'];
+    const columnWidths = [90, 220, 120, 70, 130, 120];
+    const marginX = 32;
+    const topY = 124;
+    const rowHeight = 24;
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const generatedAt = new Date().toLocaleString();
+    const categoryOrder: Record<string, number> = { 'A+': 0, A: 1, B: 2, C: 3, F: 4 };
+
+    const grouped = rows.reduce<Record<string, { teamName: string; captainName: string | null; teamLogoUrl: string | null; captainImageUrl: string | null; players: TeamFormationRow[] }>>((acc, row) => {
+      if (!acc[row.teamId]) {
+        acc[row.teamId] = {
+          teamName: row.teamName,
+          captainName: row.captainName || null,
+          teamLogoUrl: row.teamLogoUrl || null,
+          captainImageUrl: row.captainImageUrl || null,
+          players: [],
+        };
+      }
+      acc[row.teamId].players.push(row);
+      return acc;
+    }, {});
+
+    const orderedTeams = Object.values(grouped).sort((a, b) => a.teamName.localeCompare(b.teamName));
+
+    const imageCache = new Map<string, string | null>();
+    const loadImageAsDataUrl = async (url: string | null | undefined): Promise<string | null> => {
+      if (!url) return null;
+      if (imageCache.has(url)) return imageCache.get(url) ?? null;
+
+      const dataUrl = await new Promise<string | null>((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.referrerPolicy = 'no-referrer';
+        const timeout = window.setTimeout(() => resolve(null), 5000);
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 56;
+            canvas.height = 56;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              window.clearTimeout(timeout);
+              resolve(null);
+              return;
+            }
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            window.clearTimeout(timeout);
+            resolve(canvas.toDataURL('image/png'));
+          } catch {
+            window.clearTimeout(timeout);
+            resolve(null);
+          }
+        };
+        img.onerror = () => {
+          window.clearTimeout(timeout);
+          resolve(null);
+        };
+        img.src = url;
+      });
+
+      imageCache.set(url, dataUrl);
+      return dataUrl;
+    };
+
+    const drawTeamHeader = async (
+      teamName: string,
+      captainName: string | null,
+      teamLogoUrl: string | null,
+      captainImageUrl: string | null,
+      isContinuation = false
+    ) => {
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(20);
+      pdf.setTextColor(20, 30, 50);
+      pdf.text('Team Formation', marginX, 40);
+
+      pdf.setFontSize(14);
+      pdf.text(`Team: ${teamName}${isContinuation ? ' (cont.)' : ''}`, marginX, 66);
+      pdf.text(`Captain: ${captainName || 'N/A'}`, marginX, 84);
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.setTextColor(180, 180, 180);
+      pdf.text(`Generated: ${generatedAt}`, marginX, 102);
+
+      const teamLogo = await loadImageAsDataUrl(teamLogoUrl);
+      const captainLogo = await loadImageAsDataUrl(captainImageUrl);
+      const logoY = 30;
+      const rightEdge = pdf.internal.pageSize.getWidth() - 32;
+      if (captainLogo) {
+        pdf.addImage(captainLogo, 'PNG', rightEdge - 56, logoY, 48, 48);
+      } else {
+        pdf.setDrawColor(180, 180, 180);
+        pdf.rect(rightEdge - 56, logoY, 48, 48);
+      }
+      if (teamLogo) {
+        pdf.addImage(teamLogo, 'PNG', rightEdge - 112, logoY, 48, 48);
+      } else {
+        pdf.setDrawColor(180, 180, 180);
+        pdf.rect(rightEdge - 112, logoY, 48, 48);
+      }
+    };
+
+    const drawTableHeader = (y: number, widthScale = 1) => {
+      let cursorX = marginX;
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(9);
+      pdf.setTextColor(255, 255, 255);
+
+      columns.forEach((column, index) => {
+        const width = columnWidths[index] * widthScale;
+        pdf.setFillColor(25, 35, 55);
+        pdf.rect(cursorX, y, width, rowHeight, 'F');
+        pdf.setDrawColor(90, 100, 120);
+        pdf.rect(cursorX, y, width, rowHeight);
+        pdf.text(column, cursorX + 6, y + 15);
+        cursorX += width;
+      });
+
+      return y + rowHeight;
+    };
+
+    const drawRow = (y: number, row: TeamFormationRow, widthScale = 1) => {
+      const values = [
+        row.category || '-',
+        row.playerName || '-',
+        `₹${(row.bidAmount || 0).toLocaleString('en-IN')}`,
+        row.age ? String(row.age) : '-',
+        row.handy || '-',
+        row.phoneNumber || '-',
+      ];
+
+      let cursorX = marginX;
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.setTextColor(220, 220, 220);
+
+      values.forEach((value, index) => {
+        const width = columnWidths[index] * widthScale;
+        pdf.setDrawColor(70, 80, 100);
+        pdf.rect(cursorX, y, width, rowHeight);
+        const lines = pdf.splitTextToSize(String(value), width - 10);
+        pdf.text(lines[0] || '-', cursorX + 5, y + 15);
+        cursorX += width;
+      });
+
+      return y + rowHeight;
+    };
+
+    if (orderedTeams.length === 0) {
+      await drawTeamHeader('No teams', null, null, null);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(12);
+      pdf.setTextColor(180, 180, 180);
+      pdf.text('No purchased players found for team formation export.', marginX, topY + 20);
+      pdf.save('Team_Formation.pdf');
+      await waitForDownloadQueue();
+      return;
+    }
+
+    const maxPlayersInTeam = Math.max(...orderedTeams.map((team) => team.players.length), 0);
+    const teamsPerPage = maxPlayersInTeam > 8 ? 2 : maxPlayersInTeam > 5 ? 3 : 4;
+    const blockGap = 12;
+    const topMargin = 18;
+    const bottomMargin = 20;
+    const usableHeight = pageHeight - topMargin - bottomMargin - blockGap * (teamsPerPage - 1);
+    const blockHeight = usableHeight / teamsPerPage;
+    const headerSectionHeight = 66;
+    const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+    const widthScale = Math.min(1, (pdf.internal.pageSize.getWidth() - marginX * 2) / tableWidth);
+
+    for (let teamIndex = 0; teamIndex < orderedTeams.length; teamIndex += 1) {
+      if (teamIndex > 0 && teamIndex % teamsPerPage === 0) {
+        pdf.addPage();
+      }
+
+      const team = orderedTeams[teamIndex];
+      const blockIndex = teamIndex % teamsPerPage;
+      const blockStartY = topMargin + blockIndex * (blockHeight + blockGap);
+      const blockEndY = blockStartY + blockHeight;
+
+      pdf.setDrawColor(190, 200, 220);
+      pdf.roundedRect(marginX - 8, blockStartY, pdf.internal.pageSize.getWidth() - marginX * 2 + 16, blockHeight, 10, 10);
+
+      const sortedPlayers = [...team.players].sort((a, b) => {
+        const categoryDiff = (categoryOrder[a.category] ?? 99) - (categoryOrder[b.category] ?? 99);
+        if (categoryDiff !== 0) return categoryDiff;
+        return a.playerName.localeCompare(b.playerName);
+      });
+
+      const teamLogo = await loadImageAsDataUrl(team.teamLogoUrl);
+      const captainLogo = await loadImageAsDataUrl(team.captainImageUrl);
+      const logoY = blockStartY + 6;
+      if (teamLogo) {
+        pdf.addImage(teamLogo, 'PNG', marginX, logoY, 42, 42);
+      } else {
+        pdf.rect(marginX, logoY, 42, 42);
+      }
+      if (captainLogo) {
+        pdf.addImage(captainLogo, 'PNG', marginX + 48, logoY, 42, 42);
+      } else {
+        pdf.rect(marginX + 48, logoY, 42, 42);
+      }
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(12);
+      pdf.setTextColor(25, 35, 55);
+      pdf.text(`Team: ${team.teamName}`, marginX + 100, blockStartY + 22);
+      pdf.setFontSize(10);
+      pdf.text(`Captain: ${team.captainName || 'N/A'}`, marginX + 100, blockStartY + 39);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(9);
+      pdf.setTextColor(140, 150, 170);
+      pdf.text(`Generated: ${generatedAt}`, marginX + 100, blockStartY + 54);
+
+      let cursorY = drawTableHeader(blockStartY + headerSectionHeight, widthScale);
+      const maxRows = Math.max(1, Math.floor((blockEndY - cursorY - 12) / rowHeight));
+      const visibleRows = sortedPlayers.slice(0, maxRows);
+
+      visibleRows.forEach((row) => {
+        cursorY = drawRow(cursorY, row, widthScale);
+      });
+
+      const remaining = sortedPlayers.length - visibleRows.length;
+      if (remaining > 0 && cursorY + 14 <= blockEndY - 4) {
+        pdf.setFont('helvetica', 'italic');
+        pdf.setFontSize(9);
+        pdf.setTextColor(120, 130, 150);
+        pdf.text(`+${remaining} more player(s)`, marginX + 4, cursorY + 12);
+      }
+    }
+
+    pdf.save('Team_Formation.pdf');
+    await waitForDownloadQueue();
+  };
+
+  const createFallbackSnapshot = (): HTMLCanvasElement => {
+    const fallbackCanvas = document.createElement('canvas');
+    fallbackCanvas.width = 1600;
+    fallbackCanvas.height = 900;
+    const context = fallbackCanvas.getContext('2d');
+
+    if (!context) {
+      throw new Error('Unable to generate dashboard snapshot.');
+    }
+
+    context.fillStyle = '#020617';
+    context.fillRect(0, 0, fallbackCanvas.width, fallbackCanvas.height);
+    context.fillStyle = '#e2e8f0';
+    context.font = 'bold 54px Arial';
+    context.fillText('Dashboard Snapshot Unavailable', 90, 170);
+    context.font = '28px Arial';
+    context.fillStyle = '#94a3b8';
+    context.fillText('Cross-origin assets blocked capture in this browser.', 90, 230);
+    context.fillText(`Generated: ${new Date().toLocaleString()}`, 90, 280);
+
+    return fallbackCanvas;
+  };
+
+  const exportDashboardSnapshot = async () => {
+    const { default: html2canvas } = await import('html2canvas');
+    const dashboardUrl = `${window.location.origin}/dashboard`;
+    const iframe = document.createElement('iframe');
+    iframe.src = dashboardUrl;
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-10000px';
+    iframe.style.top = '0';
+    iframe.style.width = '1440px';
+    iframe.style.height = '900px';
+    iframe.style.opacity = '0';
+    iframe.style.pointerEvents = 'none';
+    iframe.setAttribute('aria-hidden', 'true');
+    let canvas: HTMLCanvasElement;
+
+    try {
+      document.body.appendChild(iframe);
+
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => reject(new Error('Dashboard snapshot timed out.')), 15000);
+        iframe.onload = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        iframe.onerror = () => {
+          window.clearTimeout(timeout);
+          reject(new Error('Dashboard snapshot failed to load.'));
+        };
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      const iframeDocument = iframe.contentDocument;
+      const iframeWindow = iframe.contentWindow;
+      const captureTarget =
+        iframeDocument?.querySelector<HTMLElement>('[data-dashboard-root]') ||
+        iframeDocument?.body;
+
+      if (!captureTarget || !iframeWindow) {
+        throw new Error('Unable to access dashboard DOM for snapshot.');
+      }
+
+      const dashboardFonts = iframeDocument?.fonts;
+      if (dashboardFonts?.ready) {
+        await dashboardFonts.ready;
+      }
+
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+
+      canvas = await html2canvas(captureTarget, {
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: '#020617',
+        logging: false,
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+        imageTimeout: 12000,
+        windowWidth: iframeWindow.innerWidth,
+        windowHeight: iframeWindow.innerHeight,
+      });
+    } catch (error) {
+      console.warn('Dashboard capture failed, using fallback snapshot.', error);
+      canvas = createFallbackSnapshot();
+    } finally {
+      if (iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
+      }
+    }
+
+    const imageUrl = canvas.toDataURL('image/jpeg', 0.92);
+    triggerDataUrlDownload(imageUrl, 'Dashboard_Snapshot.jpg');
+    await waitForDownloadQueue();
+  };
+
   const exportMutation = useMutation({
     mutationFn: async () => {
-      const { exportLogsAsCSV } = await import('@/lib/actions/logging');
-      const result = await exportLogsAsCSV();
-      if (!result.success || !result.csv) {
-        throw new Error(result.message);
-      }
-      return result.csv;
+      await exportLogEntriesWorkbook();
+      await exportTeamFormationPdf();
+      await exportDashboardSnapshot();
     },
-    onSuccess: (csv) => {
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `auction_logs_${new Date().toISOString().split('T')[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+    onMutate: () => {
+      setExportError(null);
+    },
+    onSuccess: () => {
+      setExportError(null);
       setShowExportModal(false);
+    },
+    onError: (error) => {
+      setExportError(error instanceof Error ? error.message : 'Failed to export backup files.');
     },
   });
 
@@ -183,11 +697,14 @@ export function AuctionLogs() {
           Auction Logs
         </h2>
         <button
-          onClick={() => setShowExportModal(true)}
+          onClick={() => {
+            setExportError(null);
+            setShowExportModal(true);
+          }}
           className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
         >
           <Download className="w-4 h-4" />
-          Export CSV
+          Export Backup
         </button>
       </div>
 
@@ -207,7 +724,7 @@ export function AuctionLogs() {
           <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | 'sold' | 'unsold' | 'manual')}
             className="bg-slate-900/60 border border-white/5 rounded-xl pl-10 pr-8 py-3 text-sm focus:border-primary/50 focus:bg-slate-900 outline-none transition-all appearance-none cursor-pointer"
           >
             <option value="all">All Status</option>
@@ -422,10 +939,14 @@ export function AuctionLogs() {
               className="glass-card bg-slate-900 border border-white/10 rounded-2xl p-8 max-w-md w-full"
             >
               <div className="flex items-start justify-between mb-6">
-                <h3 className="font-display text-xl font-black text-white tracking-tight uppercase">Export Logs</h3>
+                <h3 className="font-display text-xl font-black text-white tracking-tight uppercase">Export Backup</h3>
                 <button
-                  onClick={() => setShowExportModal(false)}
-                  className="text-slate-400 hover:text-white transition-colors"
+                  onClick={() => {
+                    if (exportMutation.isPending) return;
+                    setShowExportModal(false);
+                  }}
+                  disabled={exportMutation.isPending}
+                  className="text-slate-400 hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none"
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -433,14 +954,25 @@ export function AuctionLogs() {
 
               <div className="space-y-4 mb-6">
                 <p className="text-slate-400 text-sm">
-                  Export all auction logs as CSV file. The export includes all sold, unsold, and manual sale entries.
+                  Download full backup in three files:
                 </p>
+                <ul className="text-xs text-slate-300 space-y-2 list-disc pl-5">
+                  <li><span className="font-bold text-white">LOG_ENTRIES.xlsx</span></li>
+                  <li><span className="font-bold text-white">Team_Formation.pdf</span></li>
+                  <li><span className="font-bold text-white">Dashboard_Snapshot.jpg</span></li>
+                </ul>
+                {exportError && (
+                  <div className="bg-destructive/10 border border-destructive/20 text-destructive text-xs px-4 py-3 rounded-xl">
+                    {exportError}
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-4">
                 <button
                   onClick={() => setShowExportModal(false)}
-                  className="flex-1 py-4 rounded-xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest text-sm"
+                  disabled={exportMutation.isPending}
+                  className="flex-1 py-4 rounded-xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest text-sm disabled:opacity-50 disabled:pointer-events-none"
                 >
                   Cancel
                 </button>
@@ -454,11 +986,36 @@ export function AuctionLogs() {
                   ) : (
                     <>
                       <Download className="w-4 h-4" />
-                      Export CSV
+                      Export 3 Files
                     </>
                   )}
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {exportMutation.isPending && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="max-w-lg w-full bg-slate-950 border border-primary/20 rounded-2xl p-6 text-center"
+            >
+              <div className="flex items-center justify-center mb-4">
+                <div className="animate-spin text-primary text-2xl">⟳</div>
+              </div>
+              <p className="text-sm text-slate-200 leading-relaxed">
+                {EXPORT_RUNNING_MESSAGE}
+              </p>
             </motion.div>
           </motion.div>
         )}

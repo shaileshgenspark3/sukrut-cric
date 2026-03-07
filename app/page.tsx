@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useRealtimeSubscription } from '@/hooks/useRealtime';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
-import { Shield, Users, Activity, Gavel, Trophy, ArrowRight, Zap, Target, Star, CheckCircle } from 'lucide-react';
+import { Shield, Users, Activity, Gavel, Trophy, ArrowRight, Zap, Target, Star, CheckCircle, Monitor } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 const fetchSettings = async () => {
@@ -105,6 +105,13 @@ export default function LandingPage() {
 
           {/* Login Actions */}
           <motion.div variants={itemVariants} className="flex flex-wrap justify-center gap-6 mb-24">
+            <Link href="/dashboard">
+              <button className="group relative glass px-8 py-5 rounded-2xl font-display font-black tracking-widest text-lg overflow-hidden transition-all hover:scale-105 active:scale-95 border-emerald-300/40 flex items-center gap-3 min-w-[260px] justify-center bg-emerald-500/10 hover:bg-emerald-500/20">
+                <Monitor className="w-6 h-6 text-emerald-300 group-hover:rotate-6 transition-transform" />
+                <span className="text-white">LIVE DASHBOARD</span>
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+              </button>
+            </Link>
             <Link href="/login?role=captain">
               <button className="group relative glass px-8 py-5 rounded-2xl font-display font-black tracking-widest text-lg overflow-hidden transition-all hover:scale-105 active:scale-95 border-primary/30 flex items-center gap-3 min-w-[260px] justify-center bg-primary/5 hover:bg-primary/20">
                 <Users className="w-6 h-6 text-primary group-hover:rotate-12 transition-transform" />

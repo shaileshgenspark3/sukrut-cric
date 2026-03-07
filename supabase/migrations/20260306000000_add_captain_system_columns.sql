@@ -25,6 +25,37 @@ COMMENT ON COLUMN public.teams.captain_player_id IS 'Player ID of the assigned c
 -- Update app_role ENUM type (requires recreating)
 CREATE TYPE app_role_new AS ENUM ('core_admin', 'captain');
 
+-- Drop ALL policies that depend on the app_role type before altering it
+DROP POLICY IF EXISTS "Admins can update tournament settings" ON public.tournament_settings;
+DROP POLICY IF EXISTS "Admins can insert tournament settings" ON public.tournament_settings;
+DROP POLICY IF EXISTS "Core admins can update tournament settings" ON public.tournament_settings;
+DROP POLICY IF EXISTS "Core admins can insert tournament settings" ON public.tournament_settings;
+DROP POLICY IF EXISTS "Admins can manage teams" ON public.teams;
+DROP POLICY IF EXISTS "Core admins can manage teams" ON public.teams;
+DROP POLICY IF EXISTS "Admins can manage players" ON public.players;
+DROP POLICY IF EXISTS "Core admins can manage players" ON public.players;
+DROP POLICY IF EXISTS "Admins can manage auction rules" ON public.auction_rules;
+DROP POLICY IF EXISTS "Core admins can manage auction rules" ON public.auction_rules;
+DROP POLICY IF EXISTS "Admins can manage auction state" ON public.auction_state;
+DROP POLICY IF EXISTS "Core admins can manage auction state" ON public.auction_state;
+DROP POLICY IF EXISTS "Admins can manage bids" ON public.bids;
+DROP POLICY IF EXISTS "Core admins can manage bids" ON public.bids;
+DROP POLICY IF EXISTS "Core admin can manage roles" ON public.user_roles;
+DROP POLICY IF EXISTS "Core admins can manage roles" ON public.user_roles;
+DROP POLICY IF EXISTS "Core admins can view all auction logs" ON public.auction_log;
+DROP POLICY IF EXISTS "Core admins can create auction logs" ON public.auction_log;
+DROP POLICY IF EXISTS "Core admins can update auction logs" ON public.auction_log;
+DROP POLICY IF EXISTS "Admins can view all auction logs" ON public.auction_log;
+DROP POLICY IF EXISTS "Admins can create auction logs" ON public.auction_log;
+DROP POLICY IF EXISTS "Admins can update auction logs" ON public.auction_log;
+DROP POLICY IF EXISTS "Admins can view audit logs" ON public.audit_log;
+DROP POLICY IF EXISTS "Admins can create audit logs" ON public.audit_log;
+DROP POLICY IF EXISTS "Core admins can view audit logs" ON public.audit_log;
+DROP POLICY IF EXISTS "Core admins can create audit logs" ON public.audit_log;
+
+-- Drop has_role function that depends on app_role
+DROP FUNCTION IF EXISTS public.has_role(uuid, app_role);
+
 -- Update the user_roles table to use new enum
 ALTER TABLE public.user_roles ALTER COLUMN role TYPE app_role_new USING role::text::app_role_new;
 
@@ -34,37 +65,54 @@ DROP TYPE public.app_role;
 -- Rename the new type to the original name
 ALTER TYPE app_role_new RENAME TO app_role;
 
+-- Recreate has_role function with new enum type
+CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role app_role)
+RETURNS boolean AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM public.user_roles
+        WHERE user_roles.user_id = _user_id
+        AND user_roles.role = _role
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Delete any existing user_roles with role='admin' (they would have been converted during migration above)
 -- No action needed since we converted the enum
 
--- Update RLS policies to reference only core_admin and captain roles
+-- Recreate all RLS policies with new role type
+-- Tournament settings policies
+CREATE POLICY "Core admins can update tournament settings" ON public.tournament_settings FOR UPDATE USING (has_role(auth.uid(), 'core_admin'));
+CREATE POLICY "Core admins can insert tournament settings" ON public.tournament_settings FOR INSERT WITH CHECK (has_role(auth.uid(), 'core_admin'));
+
 -- Teams policies
-DROP POLICY IF EXISTS "Admins can manage teams" ON public.teams;
 CREATE POLICY "Core admins can manage teams" ON public.teams FOR ALL USING (has_role(auth.uid(), 'core_admin'));
 
 -- Players policies
-DROP POLICY IF EXISTS "Admins can manage players" ON public.players;
 CREATE POLICY "Core admins can manage players" ON public.players FOR ALL USING (has_role(auth.uid(), 'core_admin'));
 
--- Tournament settings policies
-DROP POLICY IF EXISTS "Admins can update tournament settings" ON public.tournament_settings;
-CREATE POLICY "Core admins can update tournament settings" ON public.tournament_settings FOR UPDATE USING (has_role(auth.uid(), 'core_admin'));
-
-DROP POLICY IF EXISTS "Admins can insert tournament settings" ON public.tournament_settings;
-CREATE POLICY "Core admins can insert tournament settings" ON public.tournament_settings FOR INSERT WITH CHECK (has_role(auth.uid(), 'core_admin'));
-
 -- Auction rules policies
-DROP POLICY IF EXISTS "Admins can manage auction rules" ON public.auction_rules;
 CREATE POLICY "Core admins can manage auction rules" ON public.auction_rules FOR ALL USING (has_role(auth.uid(), 'core_admin'));
 
 -- Auction state policies
-DROP POLICY IF EXISTS "Admins can manage auction state" ON public.auction_state;
 CREATE POLICY "Core admins can manage auction state" ON public.auction_state FOR ALL USING (has_role(auth.uid(), 'core_admin'));
 
 -- Bids policies
-DROP POLICY IF EXISTS "Admins can manage bids" ON public.bids;
 CREATE POLICY "Core admins can manage bids" ON public.bids FOR ALL USING (has_role(auth.uid(), 'core_admin'));
 
 -- User roles policies
-DROP POLICY IF EXISTS "Core admin can manage roles" ON public.user_roles;
 CREATE POLICY "Core admins can manage roles" ON public.user_roles FOR ALL USING (has_role(auth.uid(), 'core_admin'));
+
+-- Auction log policies (admin-only access)
+CREATE POLICY "Core admins can view all auction logs" ON public.auction_log 
+FOR SELECT USING (has_role(auth.uid(), 'core_admin'));
+CREATE POLICY "Core admins can create auction logs" ON public.auction_log 
+FOR INSERT WITH CHECK (has_role(auth.uid(), 'core_admin'));
+CREATE POLICY "Core admins can update auction logs" ON public.auction_log 
+FOR UPDATE USING (has_role(auth.uid(), 'core_admin'));
+
+-- Audit log policies (admin-only access)
+CREATE POLICY "Core admins can view audit logs" ON public.audit_log 
+FOR SELECT USING (has_role(auth.uid(), 'core_admin'));
+CREATE POLICY "Core admins can create audit logs" ON public.audit_log 
+FOR INSERT WITH CHECK (has_role(auth.uid(), 'core_admin'));

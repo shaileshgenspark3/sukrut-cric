@@ -1,0 +1,8 @@
+
+
+## WORKING MEMORY
+[2026-03-07T04:46:26.372Z] Resume checkpoint: Code review completed with REQUEST CHANGES. Severity counts: HIGH 1, MEDIUM 1, LOW 2. Must-fix before approval: (1) TS2352 in components/admin/AuctionLogs.tsx:122 (Supabase relation array cast mismatch), (2) eligible filtering inconsistency in app/admin/page.tsx lines ~2425/3025. Diagnostics run on all modified files.
+
+[2026-03-07T04:50:48.803Z] Resume action complete: fixed code-review must-fix items. (1) components/admin/AuctionLogs.tsx now normalizes Supabase relation arrays with AuctionLogSourceRow -> AuctionLog mapping, removing unsafe cast TS2352. (2) app/admin/page.tsx now applies filters to eligiblePlayers and uses filtered list for empty-state/render logic. lsp_diagnostics reports 0 issues for both touched files.
+[2026-03-07T05:21:42.508Z] Resume command handled: restored last checkpoint context. Verified prior must-fix items remain resolved; lsp_diagnostics=0 for app/admin/page.tsx and components/admin/AuctionLogs.tsx. Repository still has broad pre-existing eslint debt (204 findings) outside this targeted resume scope.
+[2026-03-07T05:35:17.938Z] Code-review blocker remediation complete (2026-03-07): fixed 4 must-fix items from code-reviewer. Dashboard data access now uses explicit allowlists (no teams(*)/players(*) on public route), sponsor presence migration role check aligned to core_admin, timer pause/resume logic corrected in both timer migration variants, and apply-migrations.js now runs real `supabase db push` with fail-fast behavior. Follow-up focused re-review returned PASS on all 4 blockers.

@@ -18,6 +18,9 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.3.1",
     "framer-motion": "^12.35.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^3.0.4",
+    "jspdf-autotable": "^5.0.2",
     "lucide-react": "^0.577.0",
     "next": "16.1.6",
     "papaparse": "^5.5.3",
@@ -26,6 +29,7 @@
     "react-dom": "19.2.3",
     "react-timer-hook": "^4.0.5",
     "tailwind-merge": "^3.5.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {

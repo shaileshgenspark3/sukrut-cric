@@ -125,6 +125,7 @@ export default function AdminDashboard() {
         { id: "players", label: "Players", icon: Users },
         { id: "captain", label: "Captain Selection", icon: Trophy },
         { id: "rules", label: "Auction Rules", icon: Settings },
+        { id: "auction-inputs", label: "Auction Inputs", icon: Upload },
         { id: "live", label: "Live Controller", icon: Gavel, requiresCore: true },
         { id: "logs", label: "Log Entries", icon: FileText }
     ];
@@ -209,11 +210,28 @@ export default function AdminDashboard() {
                 {activeTab === "players" && <PlayersTab players={players} {...modalProps} />}
                 {activeTab === "captain" && <CaptainSelectionTab teams={teams} players={players} />}
                 {activeTab === "rules" && <RulesTab rules={rules} settings={settings} />}
+                {activeTab === "auction-inputs" && <AuctionInputsTab settings={settings} />}
                 {activeTab === "live" && <LiveControllerTab auctionState={auctionState} settings={settings} players={players} teams={teams} />}
                 {activeTab === "logs" && <AuctionLogs />}
             </main>
 
             {/* Modals */}
+            <AddCaptainModal
+                show={showAddCaptain}
+                onClose={() => setShowAddCaptain(false)}
+                onSuccess={() => {
+                    queryClient.invalidateQueries({ queryKey: ['teams'] });
+                }}
+            />
+
+            <AddPlayerModal
+                show={showAddPlayer}
+                onClose={() => setShowAddPlayer(false)}
+                onSuccess={() => {
+                    queryClient.invalidateQueries({ queryKey: ['players'] });
+                }}
+            />
+
             <EditCaptainModal
                 show={showEditCaptain}
                 onClose={() => setShowEditCaptain(false)}
@@ -555,6 +573,7 @@ function AddPlayerModal({ show, onClose, onSuccess }: any) {
         playing_role: 'Batsman',
         gender: 'Male',
         base_price: 1000,
+        phone_number: '',
         image_url: ''
     });
     const [loading, setLoading] = useState(false);
@@ -580,6 +599,7 @@ function AddPlayerModal({ show, onClose, onSuccess }: any) {
                 playing_role: formData.playing_role,
                 gender: formData.gender,
                 base_price: formData.base_price,
+                phone_number: formData.phone_number || null,
                 image_url: formData.image_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formData.name)}`
             });
 
@@ -590,7 +610,7 @@ function AddPlayerModal({ show, onClose, onSuccess }: any) {
             setFormData({
                 name: '', category: 'B', age: 25, height: '', handy: 'Right-hand', type: 'Top-order',
                 earlier_seasons: '', achievements: '', special_remarks: '',
-                playing_role: 'Batsman', gender: 'Male', base_price: 1000, image_url: ''
+                playing_role: 'Batsman', gender: 'Male', base_price: 1000, phone_number: '', image_url: ''
             });
         } catch (err: any) {
             setError(err.message || 'Failed to create player');
@@ -743,6 +763,21 @@ function AddPlayerModal({ show, onClose, onSuccess }: any) {
                     </div>
 
                     <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Phone Number (Private)</label>
+                        <input
+                            type="text"
+                            value={formData.phone_number}
+                            onChange={e => setFormData({ ...formData, phone_number: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                            placeholder="10 digit number"
+                            inputMode="numeric"
+                            maxLength={10}
+                            pattern="[0-9]{10}"
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                        <p className="text-[10px] text-slate-500">Stored for exports/backend use; never shown on live dashboards.</p>
+                    </div>
+
+                    <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Special Remarks</label>
                         <textarea
                             value={formData.special_remarks}
@@ -807,6 +842,7 @@ function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
         playing_role: player?.playing_role || 'Batsman',
         gender: player?.gender || 'Male',
         base_price: player?.base_price || 1000,
+        phone_number: player?.phone_number || '',
         image_url: player?.image_url || ''
     });
     const [loading, setLoading] = useState(false);
@@ -831,6 +867,7 @@ function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
                 playing_role: formData.playing_role,
                 gender: formData.gender,
                 base_price: formData.base_price,
+                phone_number: formData.phone_number || null,
                 image_url: formData.image_url
             }).eq('id', player.id);
 
@@ -986,6 +1023,21 @@ function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
                                 <option value="Female">Female</option>
                             </select>
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Phone Number (Private)</label>
+                        <input
+                            type="text"
+                            value={formData.phone_number}
+                            onChange={e => setFormData({ ...formData, phone_number: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                            placeholder="10 digit number"
+                            inputMode="numeric"
+                            maxLength={10}
+                            pattern="[0-9]{10}"
+                            className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
+                        />
+                        <p className="text-[10px] text-slate-500">Stored for exports/backend use; never shown on live dashboards.</p>
                     </div>
 
                     <div className="space-y-2">
@@ -1304,6 +1356,126 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
     );
 }
 
+function AuctionInputsTab({ settings }: any) {
+    const queryClient = useQueryClient();
+    const [sponsorImageUrl, setSponsorImageUrl] = useState(settings?.sponsor_image_url || '');
+    const [saving, setSaving] = useState(false);
+    const fileRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        setSponsorImageUrl(settings?.sponsor_image_url || '');
+    }, [settings?.sponsor_image_url]);
+
+    const handleUpload = (file?: File) => {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (typeof reader.result === 'string') {
+                setSponsorImageUrl(reader.result);
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const saveSponsorImage = async () => {
+        if (!settings?.id) return;
+        setSaving(true);
+        try {
+            const { error } = await supabase
+                .from('tournament_settings')
+                .update({
+                    sponsor_image_url: sponsorImageUrl.trim() || null,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', settings.id);
+            if (error) throw error;
+            queryClient.invalidateQueries({ queryKey: ['settings'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard', 'settings'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+            alert('Sponsor image updated successfully');
+        } catch (error: any) {
+            alert(error.message || 'Failed to update sponsor image');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="space-y-8"
+        >
+            <div>
+                <h2 className="text-3xl font-display font-black text-white tracking-tight uppercase">Auction Inputs</h2>
+                <p className="text-slate-500 text-xs font-sans uppercase tracking-[0.2em] font-bold mt-1">
+                    Sponsor visibility controls for sold/unsold and pause states
+                </p>
+            </div>
+
+            <div className="glass-card rounded-[2.5rem] p-8 border-white/5 space-y-6">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h3 className="font-display text-2xl font-black text-white tracking-tight uppercase">Sponsors Image</h3>
+                        <p className="text-slate-500 text-sm mt-1">Upload or paste a URL for the primary sponsor image.</p>
+                    </div>
+                    <button
+                        onClick={() => fileRef.current?.click()}
+                        className="glass px-4 py-3 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-colors flex items-center gap-2"
+                    >
+                        <Upload className="w-4 h-4" />
+                        UPLOAD IMAGE
+                    </button>
+                    <input
+                        ref={fileRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) => handleUpload(event.target.files?.[0])}
+                    />
+                </div>
+
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Image URL</label>
+                    <input
+                        type="text"
+                        value={sponsorImageUrl}
+                        onChange={(e) => setSponsorImageUrl(e.target.value)}
+                        placeholder="https://... or upload from device"
+                        className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-primary/50 transition-all"
+                    />
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 min-h-[260px] flex items-center justify-center">
+                    {sponsorImageUrl ? (
+                        <img src={sponsorImageUrl} alt="Sponsor Preview" className="max-h-[380px] w-auto object-contain rounded-xl" />
+                    ) : (
+                        <p className="text-slate-600 text-sm">No sponsor image selected</p>
+                    )}
+                </div>
+
+                <div className="flex gap-4 pt-2">
+                    <button
+                        onClick={() => setSponsorImageUrl('')}
+                        disabled={saving}
+                        className="px-6 py-3 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest text-xs disabled:opacity-50"
+                    >
+                        CLEAR
+                    </button>
+                    <button
+                        onClick={saveSponsorImage}
+                        disabled={saving}
+                        className="px-6 py-3 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest text-xs disabled:opacity-50 flex items-center gap-2"
+                    >
+                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                        SAVE SPONSOR IMAGE
+                    </button>
+                </div>
+            </div>
+        </motion.div>
+    );
+}
+
 function StatCard({ title, value, icon: Icon, color, accent, isLive }: any) {
     return (
         <div className="group glass-card p-8 rounded-[2rem] border-white/5 flex flex-col justify-between h-48 relative overflow-hidden transition-all duration-500 hover:border-white/10">
@@ -1414,7 +1586,7 @@ function PlayersTab({ players, ...modalProps }: any) {
     const exportPlayersCSV = () => {
         if (!players || players.length === 0) return;
 
-        const headers = ['Serial No.', 'Name', 'Classifications', 'Age', 'Height', 'Handy', 'Type', 'Earlier Seasons', 'Achievements', 'Special Remarks', 'Combat Role', 'Variant', 'Market Base', 'Status'];
+        const headers = ['Serial No.', 'Name', 'Classifications', 'Age', 'Height', 'Handy', 'Type', 'Earlier Seasons', 'Achievements', 'Special Remarks', 'Combat Role', 'Variant', 'Market Base', 'Phone Number', 'Status'];
         const data = players.map((p: any) => [
             '',
             p.name,
@@ -1429,6 +1601,7 @@ function PlayersTab({ players, ...modalProps }: any) {
             p.playing_role,
             p.gender,
             p.base_price,
+            p.phone_number || '',
             p.is_sold ? 'Sold' : 'Available'
         ]);
         const csv = Papa.unparse([headers, ...data]);
@@ -1478,6 +1651,7 @@ function PlayersTab({ players, ...modalProps }: any) {
                             playing_role: validated['Combat Role'],
                             gender: validated.Variant,
                             base_price: validated['Market Base'],
+                            phone_number: validated['Phone Number'] || null,
                             image_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`
                         });
                         successCount++;
@@ -2087,8 +2261,24 @@ function CaptainSelectionTab({ teams, players }: any) {
 
 function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const isLive = settings?.is_auction_live;
-    const unsoldPlayers = players?.filter((p: any) => !p.is_sold) || [];
+    const soldPlayersCount = players?.filter((p: any) => p.is_sold).length || 0;
+    const showMaxBidVisibility = soldPlayersCount > 85;
+    const nextBidAmount = (auctionState?.current_bid_amount || auctionState?.current_base_price || 0) + 25000;
     const { data: recentBids } = useQuery({ queryKey: ["recent_bids"], queryFn: async () => (await supabase.from("bids").select("*, team:teams(*), player:players(*)").order("created_at", { ascending: false }).limit(20)).data });
+
+    useRealtimeSubscription('dashboard_presence', ['dashboard_live_count']);
+    const { data: liveDashboardCount = 0 } = useQuery({
+        queryKey: ['dashboard_live_count'],
+        queryFn: async () => {
+            const cutoff = new Date(Date.now() - 30000).toISOString();
+            const { count } = await supabase
+                .from('dashboard_presence')
+                .select('session_id', { count: 'exact', head: true })
+                .gte('last_seen', cutoff);
+            return count || 0;
+        },
+        refetchInterval: 10000,
+    });
 
     // Timer management
     const { totalSeconds, minutes, seconds, isRunning, isPaused, pause, resume, start, isExpired } = useTimer();
@@ -2212,8 +2402,26 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const [eligiblePlayers, setEligiblePlayers] = useState<any[]>([]);
     const [playerGenderFilter, setPlayerGenderFilter] = useState("All");
 
-    // Create filtered unsold players list
-    const filteredUnsoldPlayers = unsoldPlayers.filter((p: any) => {
+    // Filter eligible players for auction deployment
+    useEffect(() => {
+        const filterEligiblePlayers = async () => {
+            if (!players) return;
+
+            const eligible = await Promise.all(
+                players.map(async (player: any) => {
+                    const isEligible = await isPlayerEligibleForAuction(player.id);
+                    return { ...player, isEligible };
+                })
+            );
+
+            setEligiblePlayers(eligible.filter((p: any) => p.isEligible));
+        };
+
+        filterEligiblePlayers();
+    }, [players]);
+
+    // Create filtered eligible players list
+    const filteredEligiblePlayers = eligiblePlayers.filter((p: any) => {
         // Search by name
         if (playerSearch && !p.name.toLowerCase().includes(playerSearch.toLowerCase())) {
             return false;
@@ -2233,25 +2441,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (playerGenderFilter !== "All" && p.gender !== playerGenderFilter) {
             return false;
         }
-
-
-    // Filter eligible players for auction deployment
-    useEffect(() => {
-        const filterEligiblePlayers = async () => {
-            if (!players) return;
-
-            const eligible = await Promise.all(
-                players.map(async (player: any) => {
-                    const isEligible = await isPlayerEligibleForAuction(player.id);
-                    return { ...player, isEligible };
-                })
-            );
-
-            setEligiblePlayers(eligible.filter((p: any) => p.isEligible));
-        };
-
-        filterEligiblePlayers();
-    }, [players]);
         return true;
     });
 
@@ -2424,6 +2613,10 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 </div>
 
                 <div className="flex gap-4">
+                    <div className="glass px-5 py-3 rounded-2xl border-white/5">
+                        <p className="text-[10px] text-slate-500 font-black tracking-widest uppercase">Dashboard Live Count</p>
+                        <p className="font-display font-black text-xl text-white tracking-widest">{liveDashboardCount}</p>
+                    </div>
                     <button
                         onClick={toggleAuctionState}
                         className={`group flex items-center gap-3 px-8 py-4 rounded-2xl font-display font-black tracking-widest text-sm transition-all duration-500 ${isLive
@@ -2648,9 +2841,14 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                         <div className="glass-card bg-slate-950/40 border border-white/5 rounded-[2.5rem] p-8 flex flex-col shrink-0">
                             <div className="flex items-center justify-between mb-6">
                                 <h3 className="font-display text-xl font-black text-white tracking-tight uppercase">Team Eligibility</h3>
-                                <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-3 py-1 rounded-full font-black tracking-widest uppercase">
-                                    {teamEligibility.filter((t: any) => t.canBid).length} / {teamEligibility.length} Eligible
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-3 py-1 rounded-full font-black tracking-widest uppercase">
+                                        {teamEligibility.filter((t: any) => t.canBid).length} / {teamEligibility.length} Eligible
+                                    </span>
+                                    <span className={`text-[10px] px-3 py-1 rounded-full font-black tracking-widest uppercase border ${showMaxBidVisibility ? 'bg-red-500/10 text-red-300 border-red-500/20' : 'bg-slate-900/70 text-slate-500 border-white/10'}`}>
+                                        Max Bid {showMaxBidVisibility ? 'ON' : 'OFF'}
+                                    </span>
+                                </div>
                             </div>
 
                             <div className="space-y-3 max-h-[300px] overflow-y-auto scrollbar-hide">
@@ -2661,18 +2859,21 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                 ) : (
                                     teamEligibility.map((team: any) => {
                                         const banned = isTeamBanned(team.teamId);
+                                        const maxBidReached = showMaxBidVisibility && (Number(team.maxBid || 0) < nextBidAmount);
                                         return (
                                             <div
                                                 key={team.teamId}
                                                 className={`p-4 rounded-2xl flex items-center justify-between transition-all ${
-                                                    team.canBid && !banned
+                                                    maxBidReached
+                                                        ? 'bg-red-500/10 border border-red-500/40'
+                                                        : team.canBid && !banned
                                                         ? 'bg-slate-900/40 border border-white/5'
                                                         : 'bg-destructive/5 border border-destructive/20'
                                                 }`}
                                             >
                                                 <div className="flex items-center gap-3 flex-1">
                                                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black ${
-                                                        team.canBid && !banned ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'
+                                                        maxBidReached ? 'bg-red-500/20 text-red-300' : team.canBid && !banned ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'
                                                     }`}>
                                                         {team.teamName?.substring(0, 2).toUpperCase()}
                                                     </div>
@@ -2680,6 +2881,11 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                                         <p className="font-display text-sm font-black text-white tracking-wider truncate uppercase">
                                                             {team.teamName}
                                                         </p>
+                                                        {maxBidReached && (
+                                                            <p className="text-red-300 text-[10px] font-black uppercase tracking-wider mt-1">
+                                                                MAX BID LIMIT REACHED
+                                                            </p>
+                                                        )}
                                                         {banned && (
                                                             <p className="text-destructive text-xs font-black uppercase tracking-wider mt-1">
                                                                 BANNED
@@ -2693,12 +2899,14 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-4 ml-4">
-                                                    <div className="text-right">
-                                                        <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Max Bid</p>
-                                                        <p className="font-display text-sm font-black text-white tracking-tighter">
-                                                            ₹{team.maxBid?.toLocaleString() || '0'}
-                                                        </p>
-                                                    </div>
+                                                    {showMaxBidVisibility ? (
+                                                        <div className="text-right">
+                                                            <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Max Bid</p>
+                                                            <p className={`font-display text-sm font-black tracking-tighter ${maxBidReached ? 'text-red-300' : 'text-white'}`}>
+                                                                ₹{team.maxBid?.toLocaleString() || '0'}
+                                                            </p>
+                                                        </div>
+                                                    ) : null}
                                                     {banned ? (
                                                         <button
                                                             onClick={() => handleUnbanTeam(team.teamId)}
@@ -2729,7 +2937,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                     <div className="glass-card bg-slate-950/40 border border-white/5 rounded-[2.5rem] flex flex-col min-h-0 flex-1">
                     <div className="p-8 border-b border-white/5 shrink-0 flex justify-between items-center">
                         <h3 className="font-display text-2xl font-black text-white tracking-tight uppercase">Operational Queue</h3>
-                        <span className="glass px-4 py-2 rounded-xl text-[10px] font-black text-slate-400 tracking-widest uppercase">{filteredUnsoldPlayers.length} Units</span>
+                        <span className="glass px-4 py-2 rounded-xl text-[10px] font-black text-slate-400 tracking-widest uppercase">{filteredEligiblePlayers.length} Units</span>
                     </div>
 
                     {/* Search and Filters */}
@@ -2808,12 +3016,12 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
 
                     <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
                         <div className="space-y-3">
-                            {eligiblePlayers.length === 0 && (
+                            {filteredEligiblePlayers.length === 0 && (
                                 <div className="text-center py-10 text-slate-700">
                                     <p className="font-display text-sm uppercase tracking-[0.2em] opacity-40">No players match filters</p>
                                 </div>
                             )}
-                            {eligiblePlayers.length > 0 && filteredUnsoldPlayers.length > 0 && filteredUnsoldPlayers.map((p: any) => (
+                            {filteredEligiblePlayers.map((p: any) => (
                                 <div key={p.id} className="group bg-slate-950/40 border border-white/5 p-4 rounded-3xl flex items-center justify-between hover:border-primary/40 hover:bg-slate-900 transition-all duration-300">
                                     <div className="flex items-center gap-4">
                                         <div className="relative">

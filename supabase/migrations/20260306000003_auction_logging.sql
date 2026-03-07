@@ -31,78 +31,43 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
 );
 
 -- Create indexes for efficient queries
-CREATE INDEX idx_auction_log_logged_at ON public.auction_log (logged_at DESC);
-CREATE INDEX idx_auction_log_player_id ON public.auction_log (player_id);
-CREATE INDEX idx_auction_log_team_id ON public.auction_log (team_id);
-CREATE INDEX idx_auction_log_deleted ON public.auction_log (deleted);
-CREATE INDEX idx_audit_log_performed_at ON public.audit_log (performed_at DESC);
-CREATE INDEX idx_audit_log_entity ON public.audit_log (entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_auction_log_logged_at ON public.auction_log (logged_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auction_log_player_id ON public.auction_log (player_id);
+CREATE INDEX IF NOT EXISTS idx_auction_log_team_id ON public.auction_log (team_id);
+CREATE INDEX IF NOT EXISTS idx_auction_log_deleted ON public.auction_log (deleted);
+CREATE INDEX IF NOT EXISTS idx_audit_log_performed_at ON public.audit_log (performed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON public.audit_log (entity_type, entity_id);
 
 -- Enable Row Level Security
 ALTER TABLE public.auction_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
 
 -- RLS policies for auction_log (admin-only access)
-CREATE POLICY "Admins can view all auction logs"
+DROP POLICY IF EXISTS "Core admins can view all auction logs" ON public.auction_log;
+CREATE POLICY "Core admins can view all auction logs"
     ON public.auction_log FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM auth.users
-            WHERE auth.users.id = auth.uid()
-            AND auth.users.email = ANY (
-                SELECT email FROM public.admins
-            )
-        )
-    );
+    USING (has_role(auth.uid(), 'core_admin'));
 
-CREATE POLICY "Admins can create auction logs"
+DROP POLICY IF EXISTS "Core admins can create auction logs" ON public.auction_log;
+CREATE POLICY "Core admins can create auction logs"
     ON public.auction_log FOR INSERT
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM auth.users
-            WHERE auth.users.id = auth.uid()
-            AND auth.users.email = ANY (
-                SELECT email FROM public.admins
-            )
-        )
-    );
+    WITH CHECK (has_role(auth.uid(), 'core_admin'));
 
-CREATE POLICY "Admins can update auction logs"
+DROP POLICY IF EXISTS "Core admins can update auction logs" ON public.auction_log;
+CREATE POLICY "Core admins can update auction logs"
     ON public.auction_log FOR UPDATE
-    USING (
-        EXISTS (
-            SELECT 1 FROM auth.users
-            WHERE auth.users.id = auth.uid()
-            AND auth.users.email = ANY (
-                SELECT email FROM public.admins
-            )
-        )
-    );
+    USING (has_role(auth.uid(), 'core_admin'));
 
 -- RLS policies for audit_log (admin-only access)
-CREATE POLICY "Admins can view audit logs"
+DROP POLICY IF EXISTS "Core admins can view audit logs" ON public.audit_log;
+CREATE POLICY "Core admins can view audit logs"
     ON public.audit_log FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM auth.users
-            WHERE auth.users.id = auth.uid()
-            AND auth.users.email = ANY (
-                SELECT email FROM public.admins
-            )
-        )
-    );
+    USING (has_role(auth.uid(), 'core_admin'));
 
-CREATE POLICY "Admins can create audit logs"
+DROP POLICY IF EXISTS "Core admins can create audit logs" ON public.audit_log;
+CREATE POLICY "Core admins can create audit logs"
     ON public.audit_log FOR INSERT
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM auth.users
-            WHERE auth.users.id = auth.uid()
-            AND auth.users.email = ANY (
-                SELECT email FROM public.admins
-            )
-        )
-    );
+    WITH CHECK (has_role(auth.uid(), 'core_admin'));
 
 -- Comments
 COMMENT ON TABLE public.auction_log IS 'Records all auction transactions (sold, unsold, manual sales)';

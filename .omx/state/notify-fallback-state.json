@@ -1,0 +1,9 @@
+{
+  "pid": 7595,
+  "started_at": "2026-03-07T05:43:33.771Z",
+  "cwd": "/home/wadhawaniya/sukrut-cric",
+  "notify_script": "/home/wadhawaniya/.config/nvm/versions/node/v25.3.0/lib/node_modules/oh-my-codex/scripts/notify-hook.js",
+  "poll_ms": 700,
+  "tracked_files": 0,
+  "seen_turns": 0
+}
