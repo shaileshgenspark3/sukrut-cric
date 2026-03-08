@@ -1366,10 +1366,10 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                                         </td>
                                          <td className="px-4 py-6 text-right font-sans font-medium text-slate-500 text-xs tracking-tight">{t.phone_number}</td>
                                      </tr>
-                                 ))}
-                             </tbody>
-                           </table>
-                      </div>
+                                  ))}
+                              </tbody>
+                             </table>
+                    </div>
                 </div>
             </div>
         </motion.div>
@@ -1884,6 +1884,13 @@ function PlayersTab({ players, ...modalProps }: any) {
                     </table>
                 </div>
             </div>
+
+            <EraseAllConfirmationModal
+                show={showEraseConfirm}
+                onClose={() => setShowEraseConfirm(false)}
+                onConfirm={eraseAllPlayers}
+                loading={erasing}
+            />
         </motion.div>
     );
 }

@@ -1,9 +1,22 @@
 {
-  "pid": 7595,
-  "started_at": "2026-03-07T05:43:33.771Z",
+  "pid": 27937,
+  "started_at": "2026-03-08T14:25:54.371Z",
   "cwd": "/home/wadhawaniya/sukrut-cric",
   "notify_script": "/home/wadhawaniya/.config/nvm/versions/node/v25.3.0/lib/node_modules/oh-my-codex/scripts/notify-hook.js",
   "poll_ms": 700,
-  "tracked_files": 0,
-  "seen_turns": 0
+  "tracked_files": 2,
+  "seen_turns": 4,
+  "dispatch_drain": {
+    "enabled": true,
+    "max_per_tick": 5,
+    "run_count": 13134,
+    "leader_only": true,
+    "last_tick_at": "2026-03-08T17:00:20.686Z",
+    "last_result": {
+      "processed": 0,
+      "skipped": 0,
+      "failed": 0
+    },
+    "last_error": null
+  }
 }
