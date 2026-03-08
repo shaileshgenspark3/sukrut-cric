@@ -613,7 +613,16 @@ function AddPlayerModal({ show, onClose, onSuccess }: any) {
                 playing_role: 'Batsman', gender: 'Male', base_price: 1000, phone_number: '', image_url: ''
             });
         } catch (err: any) {
-            setError(err.message || 'Failed to create player');
+            // Provide user-friendly error messages for common issues
+            let errorMessage = err.message || 'Failed to create player';
+
+            if (errorMessage.includes('row-level security policy')) {
+                errorMessage = 'Permission denied: Only core admins can create players. Please log in as the core admin account.';
+            } else if (errorMessage.includes('duplicate key') || errorMessage.includes('unique')) {
+                errorMessage = 'A player with this name already exists.';
+            }
+
+            setError(errorMessage);
         } finally {
             setLoading(false);
         }
