@@ -837,25 +837,34 @@ function AddPlayerModal({ show, onClose, onSuccess }: any) {
     );
 }
 
+const getEditPlayerFormData = (player: any) => ({
+    name: player?.name ?? '',
+    category: player?.category ?? 'B',
+    age: player?.age ?? '',
+    height: player?.height ?? '',
+    handy: player?.handy ?? '',
+    type: player?.type ?? '',
+    earlier_seasons: player?.earlier_seasons ?? '',
+    achievements: player?.achievements ?? '',
+    special_remarks: player?.special_remarks ?? '',
+    playing_role: player?.playing_role ?? 'Batsman',
+    gender: player?.gender ?? 'Male',
+    base_price: player?.base_price ?? 1000,
+    phone_number: player?.phone_number ?? '',
+    image_url: player?.image_url ?? ''
+});
+
 function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
-    const [formData, setFormData] = useState({
-        name: player?.name || '',
-        category: player?.category || 'B',
-        age: player?.age || 25,
-        height: player?.height || '',
-        handy: player?.handy || 'Right-hand',
-        type: player?.type || 'Top-order',
-        earlier_seasons: player?.earlier_seasons || '',
-        achievements: player?.achievements || '',
-        special_remarks: player?.special_remarks || '',
-        playing_role: player?.playing_role || 'Batsman',
-        gender: player?.gender || 'Male',
-        base_price: player?.base_price || 1000,
-        phone_number: player?.phone_number || '',
-        image_url: player?.image_url || ''
-    });
+    const [formData, setFormData] = useState(getEditPlayerFormData(player));
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (show) {
+            setFormData(getEditPlayerFormData(player));
+            setError('');
+        }
+    }, [player, show]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -866,10 +875,10 @@ function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
             const { error } = await supabase.from('players').update({
                 name: formData.name,
                 category: formData.category,
-                age: formData.age,
+                age: formData.age === '' ? null : formData.age,
                 height: formData.height,
-                handy: formData.handy,
-                type: formData.type,
+                handy: formData.handy || null,
+                type: formData.type || null,
                 earlier_seasons: formData.earlier_seasons,
                 achievements: formData.achievements,
                 special_remarks: formData.special_remarks,
@@ -937,7 +946,7 @@ function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
                             <input
                                 type="number"
                                 value={formData.age}
-                                onChange={e => setFormData({ ...formData, age: parseInt(e.target.value) || 0 })}
+                                onChange={e => setFormData({ ...formData, age: e.target.value === '' ? '' : parseInt(e.target.value, 10) || '' })}
                                 min={15}
                                 max={50}
                                 className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
@@ -962,6 +971,7 @@ function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
                                 onChange={e => setFormData({ ...formData, handy: e.target.value })}
                                 className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
                             >
+                                <option value="">Unset</option>
                                 <option value="Right-hand">Right-hand Bat</option>
                                 <option value="Left-hand">Left-hand Bat</option>
                                 <option value="Right-arm">Right-arm Bowl</option>
@@ -976,6 +986,7 @@ function EditPlayerModal({ show, onClose, player, onSuccess }: any) {
                                 onChange={e => setFormData({ ...formData, type: e.target.value })}
                                 className="w-full bg-slate-950 border border-white/10 rounded-2xl px-5 py-3 text-white outline-none focus:border-gold/50 transition-all"
                             >
+                                <option value="">Unset</option>
                                 <option value="Top-order">Top-order</option>
                                 <option value="Middle-order">Middle-order</option>
                                 <option value="Opener">Opener</option>
@@ -1630,30 +1641,27 @@ function PlayersTab({ players, ...modalProps }: any) {
                 let skipCount = 0;
                 let errorCount = 0;
                 const errors: string[] = [];
+                const existingNames = new Set((players || []).map((p: any) => p.name.toLowerCase()));
+                const { PlayerCSVSchema } = await import('@/lib/csv/playerSchema');
 
                 for (const row of rows) {
                     try {
-                        // Import PlayerCSVSchema
-                        const { PlayerCSVSchema } = await import('@/lib/csv/playerSchema');
-
-                        // Validate row with Zod schema
                         const validated = PlayerCSVSchema.parse(row);
-
                         const name = validated.Name.trim();
-                        const existingPlayer = players?.find((p: any) => p.name.toLowerCase() === name.toLowerCase());
+                        const normalizedName = name.toLowerCase();
 
-                        if (existingPlayer) {
+                        if (existingNames.has(normalizedName)) {
                             skipCount++;
                             continue;
                         }
 
-                        await supabase.from('players').insert({
+                        const { error: insertError } = await supabase.from('players').insert({
                             name,
                             category: validated.Classifications,
-                            age: validated.Age,
+                            age: validated.Age ?? null,
                             height: validated.Height,
-                            handy: validated.Handy,
-                            type: validated.Type,
+                            handy: validated.Handy ?? null,
+                            type: validated.Type ?? null,
                             earlier_seasons: validated['Earlier Seasons'],
                             achievements: validated.Achievements,
                             special_remarks: validated['Special Remarks'],
@@ -1663,6 +1671,10 @@ function PlayersTab({ players, ...modalProps }: any) {
                             phone_number: validated['Phone Number'] || null,
                             image_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`
                         });
+
+                        if (insertError) throw insertError;
+
+                        existingNames.add(normalizedName);
                         successCount++;
                     } catch (err: any) {
                         errorCount++;
@@ -2379,8 +2391,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     // Listen for timer expiry event
     useEffect(() => {
         const handleExpiry = (e: Event) => {
-            const customEvent = e as CustomEvent;
-            console.log("Timer expired:", customEvent.detail);
             // Handle expiry logic - show modal
             const hasBids = (auctionState?.bid_count || 0) > 0;
             setExpiryModalType(hasBids ? 'has_bids' : 'no_bids');

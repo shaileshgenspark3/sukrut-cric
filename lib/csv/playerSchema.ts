@@ -1,12 +1,18 @@
 import { z } from 'zod';
 
+const blankToUndefined = (value: unknown) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+};
+
 export const PlayerCSVSchema = z.object({
   'Name': z.string().min(1, 'Name is required'),
   'Classifications': z.enum(['A+', 'A', 'B', 'C', 'F']).default('B'),
-  'Age': z.coerce.number().int().min(15).max(50).default(25),
+  'Age': z.preprocess(blankToUndefined, z.coerce.number().int().min(15).max(50).optional()),
   'Height': z.string().optional(),
-  'Handy': z.enum(['Right-hand', 'Left-hand', 'Right-arm', 'Left-arm']).default('Right-hand'),
-  'Type': z.enum(['Top-order', 'Middle-order', 'Opener', 'Finisher']).default('Top-order'),
+  'Handy': z.preprocess(blankToUndefined, z.enum(['Right-hand', 'Left-hand', 'Right-arm', 'Left-arm']).optional()),
+  'Type': z.preprocess(blankToUndefined, z.enum(['Top-order', 'Middle-order', 'Opener', 'Finisher']).optional()),
   'Earlier Seasons': z.string().optional(),
   'Achievements': z.string().optional(),
   'Special Remarks': z.string().optional(),
