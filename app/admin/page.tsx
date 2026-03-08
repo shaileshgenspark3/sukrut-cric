@@ -110,12 +110,19 @@ export default function AdminDashboard() {
                 await supabase.from('teams').delete().eq('id', deleteConfirm.id);
                 // Note: Auth user is not deleted (security consideration)
             } else if (deleteConfirm.type === 'player') {
-                await supabase.from('players').delete().eq('id', deleteConfirm.id);
+                console.log('Attempting to delete player:', deleteConfirm);
+                const { error } = await supabase.from('players').delete().eq('id', deleteConfirm.id);
+                if (error) {
+                    console.error('Delete error:', error);
+                    throw error;
+                }
+                console.log('Player deleted successfully');
             }
             queryClient.invalidateQueries({ queryKey: ['teams'] });
             queryClient.invalidateQueries({ queryKey: ['players'] });
             setDeleteConfirm(null);
         } catch (err: any) {
+            console.error('Delete failed:', err);
             alert('Delete failed: ' + err.message);
         }
     };
@@ -1822,7 +1829,14 @@ function PlayersTab({ players, ...modalProps }: any) {
                                                 <Edit className="w-4 h-4" />
                                             </button>
                                             <button
-                                                onClick={() => !p.is_sold && modalProps.setDeleteConfirm({ type: 'player', id: p.id, name: p.name })}
+                                                onClick={() => {
+                                                    if (p.is_sold) {
+                                                        alert('Cannot delete sold players');
+                                                        return;
+                                                    }
+                                                    console.log('Delete clicked:', { id: p.id, name: p.name });
+                                                    modalProps.setDeleteConfirm({ type: 'player', id: p.id, name: p.name });
+                                                }}
                                                 disabled={p.is_sold}
                                                 className={`p-2 rounded-lg transition-colors ${p.is_sold ? 'bg-slate-800/30 text-slate-600 cursor-not-allowed' : 'bg-destructive/10 hover:bg-destructive/20 text-destructive'}`}
                                                 title="Delete Player"
