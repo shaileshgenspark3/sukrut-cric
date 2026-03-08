@@ -83,7 +83,7 @@ export default function AdminDashboard() {
     });
     const { data: players } = useQuery({
         queryKey: ["players"],
-        queryFn: async () => (await supabase.from("players").select("*, sold_to_team:teams(*)").order('name')).data
+        queryFn: async () => (await supabase.from("players").select("*, sold_to_team:teams!players_sold_to_team_id_fkey(*)").order('name')).data
     });
     const { data: rules } = useQuery({
         queryKey: ["rules"],

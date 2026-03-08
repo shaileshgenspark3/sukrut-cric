@@ -24,7 +24,7 @@ const fetchRecentBids = async () => {
 };
 
 const fetchTopSoldPlayers = async () => {
-  const { data } = await supabase.from('players').select('*, sold_to_team:teams(*)').eq('is_sold', true).order('sold_price', { ascending: false }).limit(10);
+  const { data } = await supabase.from('players').select('*, sold_to_team:teams!players_sold_to_team_id_fkey(*)').eq('is_sold', true).order('sold_price', { ascending: false }).limit(10);
   return data;
 };
 
