@@ -111,6 +111,14 @@ export default function AdminDashboard() {
                 // Note: Auth user is not deleted (security consideration)
             } else if (deleteConfirm.type === 'player') {
                 console.log('Attempting to delete player:', deleteConfirm);
+                // Delete all bids for this player first (foreign key constraint)
+                const { error: bidsError } = await supabase.from('bids').delete().eq('player_id', deleteConfirm.id);
+                if (bidsError) {
+                    console.error('Failed to delete bids:', bidsError);
+                    throw bidsError;
+                }
+                console.log('Bids deleted successfully');
+                // Now delete the player
                 const { error } = await supabase.from('players').delete().eq('id', deleteConfirm.id);
                 if (error) {
                     console.error('Delete error:', error);
@@ -120,6 +128,8 @@ export default function AdminDashboard() {
             }
             queryClient.invalidateQueries({ queryKey: ['teams'] });
             queryClient.invalidateQueries({ queryKey: ['players'] });
+            queryClient.invalidateQueries({ queryKey: ['auction_state'] });
+            queryClient.invalidateQueries({ queryKey: ['recent_bids'] });
             setDeleteConfirm(null);
         } catch (err: any) {
             console.error('Delete failed:', err);
