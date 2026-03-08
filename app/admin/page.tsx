@@ -83,7 +83,7 @@ export default function AdminDashboard() {
     });
     const { data: players } = useQuery({
         queryKey: ["players"],
-        queryFn: async () => (await supabase.from("players").select("*, team:teams(*)").order('name')).data
+        queryFn: async () => (await supabase.from("players").select("*, sold_to_team:teams(*)").order('name')).data
     });
     const { data: rules } = useQuery({
         queryKey: ["rules"],
@@ -1851,7 +1851,7 @@ function PlayersTab({ players, ...modalProps }: any) {
                                                     <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
                                                     SOLD ₹{p.sold_price?.toLocaleString() || '0'}
                                                 </div>
-                                                <span className="text-[10px] text-slate-500 font-black tracking-widest uppercase">{p.team?.team_name}</span>
+                                                <span className="text-[10px] text-slate-500 font-black tracking-widest uppercase">{p.sold_to_team?.team_name}</span>
                                             </div>
                                         ) : (
                                             <span className="text-slate-600 text-[10px] font-black tracking-[0.2em] uppercase border border-white/5 px-3 py-1 rounded-full">Available</span>

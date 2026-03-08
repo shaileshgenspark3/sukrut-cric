@@ -24,7 +24,7 @@ const fetchRecentBids = async () => {
 };
 
 const fetchTopSoldPlayers = async () => {
-  const { data } = await supabase.from('players').select('*, team:teams(*)').eq('is_sold', true).order('sold_price', { ascending: false }).limit(10);
+  const { data } = await supabase.from('players').select('*, sold_to_team:teams(*)').eq('is_sold', true).order('sold_price', { ascending: false }).limit(10);
   return data;
 };
 
@@ -269,7 +269,7 @@ export default function LandingPage() {
                           <div className="flex-1">
                             <p className="font-black text-white text-xs truncate uppercase tracking-tight">{p.name}</p>
                             <p className="text-gold font-display font-black text-sm">₹{p.sold_price?.toLocaleString()}</p>
-                            <p className="text-[10px] text-slate-500 font-bold truncate opacity-80 uppercase">{p.team?.team_name}</p>
+                            <p className="text-[10px] text-slate-500 font-bold truncate opacity-80 uppercase">{p.sold_to_team?.team_name}</p>
                           </div>
                           <div className="bg-gold/10 p-2 rounded-xl">
                             <CheckCircle className="w-4 h-4 text-gold" />
