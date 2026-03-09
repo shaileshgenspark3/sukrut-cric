@@ -2528,7 +2528,14 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             setShowDeployConfirm(false);
             setPlayerToDeploy(null);
         } catch (error: any) {
-            alert(error.message || 'Failed to deploy player');
+            console.error('=== DEPLOY ERROR DETAILS ===');
+            console.error('Error object:', error);
+            console.error('Error message:', error?.message);
+            console.error('Error name:', error?.name);
+            console.error('Error stack:', error?.stack);
+            console.error('Full error:', JSON.stringify(error, null, 2));
+            console.error('=============================');
+            alert(`Deploy Error: ${error?.message || 'Unknown error'}. Check console for details.`);
         }
     };
 
