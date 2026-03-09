@@ -2406,6 +2406,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     // Expiry modal state - shows when timer expires
     const [showExpiryModal, setShowExpiryModal] = useState(false);
     const [expiryModalType, setExpiryModalType] = useState<'no_bids' | 'has_bids'>('no_bids');
+    const [expiryHandledPlayerId, setExpiryHandledPlayerId] = useState<string | null>(null);
     
     // Deploy confirmation modal
     const [showDeployConfirm, setShowDeployConfirm] = useState(false);
@@ -2422,28 +2423,38 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     // Listen for timer expiry event
     useEffect(() => {
         const handleExpiry = (e: Event) => {
-            // Handle expiry logic - show modal
+            const playerId = auctionState?.current_player_id;
+            if (!playerId) return;
+            if (expiryHandledPlayerId === playerId) return;
+
             const hasBids = (auctionState?.bid_count || 0) > 0;
             setExpiryModalType(hasBids ? 'has_bids' : 'no_bids');
             setShowExpiryModal(true);
+            setExpiryHandledPlayerId(playerId);
         };
 
         window.addEventListener("timer-expiry", handleExpiry);
         return () => window.removeEventListener("timer-expiry", handleExpiry);
-    }, [auctionState?.bid_count]);
+    }, [auctionState?.bid_count, auctionState?.current_player_id, expiryHandledPlayerId]);
 
     // Timer expiry detection - monitor totalSeconds (without queryClient)
     useEffect(() => {
-        // Check if timer just expired (went from running to 0)
-        if (totalSeconds === 0 && auctionState?.current_player_id && 
-            (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid')) {
-            
-            // Determine modal type based on bid count
+        const playerId = auctionState?.current_player_id;
+        if (!playerId) {
+            setExpiryHandledPlayerId(null);
+            return;
+        }
+
+        if (totalSeconds === 0 &&
+            (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid') &&
+            expiryHandledPlayerId !== playerId
+        ) {
             const hasBids = (auctionState?.bid_count || 0) > 0;
             setExpiryModalType(hasBids ? 'has_bids' : 'no_bids');
             setShowExpiryModal(true);
+            setExpiryHandledPlayerId(playerId);
         }
-    }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.bid_count]);
+    }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.bid_count, expiryHandledPlayerId]);
 
     const [playerSearch, setPlayerSearch] = useState("");
     const [playerCategoryFilter, setPlayerCategoryFilter] = useState("All");
@@ -2545,6 +2556,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (auctionState?.current_player_id) {
             try {
                 await markPlayerUnsold(auctionState.current_player_id);
+                setExpiryHandledPlayerId(null);
+                window.dispatchEvent(new CustomEvent("timer-restart"));
             } catch (error: any) {
                 alert(error.message || 'Failed to mark player as unsold');
             }
@@ -2557,6 +2570,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (auctionState?.current_player_id) {
             try {
                 await reAuctionPlayer(auctionState.current_player_id);
+                setExpiryHandledPlayerId(null);
+                window.dispatchEvent(new CustomEvent("timer-restart"));
                 setShowExpiryModal(false);
             } catch (error: any) {
                 alert(error.message || 'Failed to re-auction player');
@@ -2576,6 +2591,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         try {
             await resetAuction();
             alert('Auction has been reset. Player removed from auction.');
+            setExpiryHandledPlayerId(null);
         } catch (error: any) {
             alert(error.message || 'Failed to reset auction');
         }
@@ -2601,6 +2617,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 origin: { y: 0.6 },
                 colors: ['#FFD700', '#FFFFFF', '#3b82f6']
             });
+            setExpiryHandledPlayerId(null);
+            window.dispatchEvent(new CustomEvent("timer-restart"));
             setShowExpiryModal(false);
         } catch (error: any) {
             alert(error.message || 'Failed to finalize sale');
@@ -2692,15 +2710,27 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                         <p className="text-[10px] text-slate-500 font-black tracking-widest uppercase">Dashboard Live Count</p>
                         <p className="font-display font-black text-xl text-white tracking-widest">{liveDashboardCount}</p>
                     </div>
-                    <button
-                        onClick={toggleAuctionState}
-                        className={`group flex items-center gap-3 px-8 py-4 rounded-2xl font-display font-black tracking-widest text-sm transition-all duration-500 ${isLive
-                            ? 'bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20'
-                            : 'bg-primary border text-white hover:scale-105 active:scale-95 glow-electric'
-                            }`}
-                    >
-                        {isLive ? <><PauseCircle className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" /> KILL ENGINE</> : <><PlayCircle className="w-5 h-5 group-hover:rotate-12 transition-transform" /> ACTIVATE ENGINE</>}
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={toggleAuctionState}
+                            className={`group flex items-center gap-3 px-8 py-4 rounded-2xl font-display font-black tracking-widest text-sm transition-all duration-500 ${isLive
+                                ? 'bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20'
+                                : 'bg-primary border text-white hover:scale-105 active:scale-95 glow-electric'
+                                }`}
+                        >
+                            {isLive ? <><PauseCircle className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" /> KILL ENGINE</> : <><PlayCircle className="w-5 h-5 group-hover:rotate-12 transition-transform" /> ACTIVATE ENGINE</>}
+                        </button>
+                        {auctionState?.current_player && (
+                            <button
+                                onClick={handleResetAuction}
+                                className="flex items-center gap-2 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest border border-white/20 text-white bg-white/5 hover:bg-white/10 transition-all"
+                                title="Remove the current player from auction immediately"
+                            >
+                                <RotateCcw className="w-4 h-4" />
+                                Remove Player
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 

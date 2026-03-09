@@ -212,6 +212,9 @@ export async function markPlayerUnsold(playerId: string) {
         bid_count: 0,
         status: "idle",
         current_bidder_team_id: null,
+        timer_end: null,
+        is_paused: false,
+        paused_at: null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", auctionState.id);
