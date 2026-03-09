@@ -2521,11 +2521,11 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
 
     const confirmDeploy = async () => {
         if (!playerToDeploy) return;
-        
+
         try {
             await deployPlayer(playerToDeploy.id);
             // Start the timer after successful deployment
-            await start(firstBidTimer);
+            await startTimer(firstBidTimer);
             setShowDeployConfirm(false);
             setPlayerToDeploy(null);
         } catch (error: any) {
@@ -2549,7 +2549,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const handleExpiryReauction = async () => {
         // User chose to re-auction - restart timer
         try {
-            await start(firstBidTimer);
+            await startTimer(firstBidTimer);
             setShowExpiryModal(false);
         } catch (error: any) {
             alert(error.message || 'Failed to re-auction player');
