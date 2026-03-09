@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { revalidateAuctionViews } from "@/lib/actions/revalidateAuctionViews";
 
 const CreateLogEntrySchema = z.object({
@@ -38,7 +39,7 @@ export async function createLogEntry(
       isManual,
     });
 
-    const { data: player, error: playerError } = await supabase
+    const { data: player, error: playerError } = await supabaseAdmin
       .from("players")
       .select("*")
       .eq("id", validated.playerId)
@@ -48,23 +49,14 @@ export async function createLogEntry(
       throw new Error(`Player not found: ${playerError?.message}`);
     }
 
-    const { data: currentUser } = await supabase.auth.getUser();
-    if (!currentUser.user) {
-      throw new Error("Not authenticated");
-    }
-
-    const { data: team } = teamId
-      ? await supabase.from("teams").select("*").eq("id", teamId).single()
-      : { data: null };
-
-    const bidCountResult = await supabase
+    const bidCountResult = await supabaseAdmin
       .from("bids")
       .select("id", { count: "exact", head: false })
       .eq("player_id", validated.playerId);
 
     const bidCount = bidCountResult.count || 0;
 
-    const { data: logEntry, error: logError } = await supabase
+    const { data: logEntry, error: logError } = await supabaseAdmin
       .from("auction_log")
       .insert({
         player_id: validated.playerId,
@@ -75,7 +67,6 @@ export async function createLogEntry(
         bid_count: bidCount,
         category: player.category,
         gender: player.gender,
-        logged_by: currentUser.user.id,
         is_manual: validated.isManual,
       })
       .select("id")

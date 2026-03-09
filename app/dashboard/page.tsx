@@ -171,15 +171,11 @@ export default function LiveAuctionDashboard() {
   const { data: auctionLogs = [] } = useQuery<any[]>({
     queryKey: ["dashboard", "auction_logs"],
     queryFn: async () => {
-      const { data } = await supabase
-        .from("auction_log")
-        .select(
-          "id, player_id, team_id, status, sale_price, category, logged_at, deleted, is_manual, player:players(id, name, player_number, image_url, category), team:teams(id, team_name, captain_name, captain_image_url, team_logo_url)"
-        )
-        .eq("deleted", false)
-        .order("logged_at", { ascending: false })
-        .limit(1000);
-      return data || [];
+      const response = await fetch("/api/dashboard/auction-log");
+      if (!response.ok) {
+        throw new Error("Failed to fetch dashboard auction logs");
+      }
+      return response.json();
     },
     refetchInterval: 5000,
   });
@@ -197,20 +193,13 @@ export default function LiveAuctionDashboard() {
     },
   });
 
-  const { data: recentSales = [] } = useQuery<any[]>({
-    queryKey: ["dashboard", "recent_sales"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("auction_log")
-        .select("id, sale_price, logged_at, player:players(name), team:teams(team_name)")
-        .eq("deleted", false)
-        .in("status", ["sold", "manual"])
-        .order("logged_at", { ascending: false })
-        .limit(16);
-      return data || [];
-    },
-    refetchInterval: 5000,
-  });
+  const recentSales = useMemo(
+    () =>
+      auctionLogs
+        .filter((log) => ["sold", "manual"].includes(log.status))
+        .slice(0, 16),
+    [auctionLogs]
+  );
 
   const currentPlayerId = auctionState?.current_player?.id || auctionState?.current_player_id || null;
   const currentBid =
