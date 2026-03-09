@@ -2407,6 +2407,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const [showExpiryModal, setShowExpiryModal] = useState(false);
     const [expiryModalType, setExpiryModalType] = useState<'no_bids' | 'has_bids'>('no_bids');
     const [expiryHandledPlayerId, setExpiryHandledPlayerId] = useState<string | null>(null);
+    const [resolvingExpiryAction, setResolvingExpiryAction] = useState(false);
     
     // Deploy confirmation modal
     const [showDeployConfirm, setShowDeployConfirm] = useState(false);
@@ -2419,6 +2420,45 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
 
     // Track previous status for detecting transitions
     const [previousStatus, setPreviousStatus] = useState<string>('');
+    const queryClient = useQueryClient();
+
+    const clearAuctionStateInCache = useCallback(() => {
+        const clearAdminAuctionState = (prev: any) => prev ? {
+            ...prev,
+            current_player_id: null,
+            current_player: null,
+            current_base_price: null,
+            current_bid_amount: null,
+            current_bidder_team_id: null,
+            current_bidder: null,
+            bid_count: 0,
+            timer_end: null,
+            is_paused: false,
+            paused_at: null,
+            status: 'idle',
+        } : prev;
+
+        const clearDashboardAuctionState = (prev: any) => prev ? {
+            ...prev,
+            current_player_id: null,
+            current_player: undefined,
+            current_base_price: null,
+            current_bid_amount: null,
+            current_bid: null,
+            current_bidder_team_id: null,
+            current_bidder: undefined,
+            bid_count: 0,
+            timer_end: null,
+            is_paused: false,
+            paused_at: null,
+            status: 'idle',
+        } : prev;
+
+        queryClient.setQueryData(["auction_state"], clearAdminAuctionState);
+        queryClient.setQueryData(["dashboard", "auction_state"], clearDashboardAuctionState);
+        queryClient.removeQueries({ queryKey: ["bids"], exact: false });
+        window.dispatchEvent(new CustomEvent("timer-restart"));
+    }, [queryClient]);
 
     // Listen for timer expiry event
     useEffect(() => {
@@ -2507,8 +2547,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         return true;
     });
 
-    const queryClient = useQueryClient();
-    
     // Track status changes for sold/unsold feedback
     useEffect(() => {
         if (previousStatus && previousStatus !== auctionState?.status) {
@@ -2557,28 +2595,43 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         // User chose to keep unsold
         if (auctionState?.current_player_id) {
             try {
-                await markPlayerUnsold(auctionState.current_player_id);
-                queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
-                window.dispatchEvent(new CustomEvent("timer-restart"));
+                setResolvingExpiryAction(true);
+                setShowExpiryModal(false);
+                setExpiryHandledPlayerId(auctionState.current_player_id);
+                clearAuctionStateInCache();
+                await resetAuction();
+                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+                await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
             } catch (error: any) {
+                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+                setShowExpiryModal(true);
                 alert(error.message || 'Failed to mark player as unsold');
+            } finally {
+                setResolvingExpiryAction(false);
             }
         }
-        setShowExpiryModal(false);
     };
 
     const handleExpiryReauction = async () => {
         // User chose to re-auction - restart timer and reset auction state
         if (auctionState?.current_player_id) {
             try {
-                await reAuctionPlayer(auctionState.current_player_id);
-                queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
-                window.dispatchEvent(new CustomEvent("timer-restart"));
+                setResolvingExpiryAction(true);
                 setShowExpiryModal(false);
+                setExpiryHandledPlayerId(auctionState.current_player_id);
+                await reAuctionPlayer(auctionState.current_player_id);
+                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+                await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
             } catch (error: any) {
+                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+                setShowExpiryModal(true);
                 alert(error.message || 'Failed to re-auction player');
+            } finally {
+                setResolvingExpiryAction(false);
             }
         } else {
             alert('No player currently in auction');
@@ -2592,14 +2645,16 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             return;
         }
         
-            try {
-                await resetAuction();
-                queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
-                alert('Auction has been reset. Player removed from auction.');
-            } catch (error: any) {
-                alert(error.message || 'Failed to reset auction');
-            }
+        try {
+            await resetAuction();
+            clearAuctionStateInCache();
+            await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+            await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+            await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+            alert('Auction has been reset. Player removed from auction.');
+        } catch (error: any) {
+            alert(error.message || 'Failed to reset auction');
+        }
     };
 
     const handleExpiryConfirmSale = async () => {
@@ -2691,10 +2746,11 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (!auctionState?.current_player_id) return;
         
         try {
-            await markPlayerUnsold(auctionState.current_player_id);
-            queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-            queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
-            window.dispatchEvent(new CustomEvent("timer-restart"));
+            await resetAuction();
+            clearAuctionStateInCache();
+            await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+            await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+            await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
         } catch (err: any) {
             alert(err.message || 'Failed to mark player as unsold');
         }
@@ -3315,12 +3371,14 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                     <div className="flex gap-4">
                                         <button
                                             onClick={handleExpiryNoBids}
+                                            disabled={resolvingExpiryAction}
                                             className="flex-1 py-4 rounded-2xl bg-destructive text-white hover:bg-destructive/90 transition-all font-black tracking-widest"
                                         >
-                                            KEEP UNSOLD
+                                            {resolvingExpiryAction ? 'WORKING...' : 'KEEP UNSOLD'}
                                         </button>
                                         <button
                                             onClick={handleExpiryReauction}
+                                            disabled={resolvingExpiryAction}
                                             className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)]"
                                         >
                                             RE-AUCTION
