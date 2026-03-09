@@ -74,6 +74,11 @@ export async function deployPlayer(playerId: string) {
       throw new Error(`Failed to fetch auction state: ${stateError.message}`);
     }
 
+    // Check if there's already a player in auction
+    if (auctionState.status !== "idle" && auctionState.current_player_id) {
+      throw new Error("Cannot deploy player: There is already an active auction in progress. Please sell or mark the current player as unsold first.");
+    }
+
     // 3. Get timer settings
     console.log('Step 3: Fetching timer settings...');
     const { data: settings, error: settingsError } = await supabase
