@@ -74,6 +74,8 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
 
     // 3. Use auction_state timer settings as source of truth
     const timerSeconds = auctionState.first_bid_timer_seconds || 30;
+    const deployedAt = new Date();
+    const timerEnd = new Date(deployedAt.getTime() + timerSeconds * 1000).toISOString();
 
     // 4. Update auction_state table
     const updateData = {
@@ -85,7 +87,10 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
       bid_count: 0,
       status: "waiting_for_first_bid",
       current_bidder_team_id: null,
-      updated_at: new Date().toISOString(),
+      timer_end: timerEnd,
+      is_paused: false,
+      paused_at: null,
+      updated_at: deployedAt.toISOString(),
     };
     
     const { error: updateError } = await supabase

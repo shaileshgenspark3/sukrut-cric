@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRealtimeSubscription } from '@/hooks/useRealtime';
 import { useTimer } from '@/hooks/useTimer';
-import { formatMinutesSeconds } from '@/lib/services/timer/timerService';
+import { calculateRemainingSeconds, formatMinutesSeconds } from '@/lib/services/timer/timerService';
 import {
     Loader2, LogOut, Wallet, User as UserIcon,
     Users, Trophy, AlertCircle, Info, Zap,
@@ -181,14 +181,19 @@ export default function CaptainDashboard() {
     const liveCurrentBidderTeamId = liveTopBid?.team_id ?? auctionState?.current_bidder_team_id ?? null;
     const isHighestBidder = liveCurrentBidderTeamId === team?.id;
     const soldPlayerCount = soldPlayerCountFallback;
+    const auctionTimerRemainingSeconds = calculateRemainingSeconds(
+        auctionState?.timer_end ?? null,
+        !!auctionState?.is_paused,
+        auctionState?.paused_at ?? null
+    );
     const isAwaitingAdminDecision =
         !!auctionState?.current_player &&
         !!auctionState?.timer_end &&
-        totalSeconds === 0 &&
+        !auctionState?.is_paused &&
+        auctionTimerRemainingSeconds === 0 &&
         (
             auctionState?.status === 'bidding' ||
-            auctionState?.status === 'waiting_for_first_bid' ||
-            auctionState?.is_paused
+            auctionState?.status === 'waiting_for_first_bid'
         );
     const didAuctionCloseWithBid = isAwaitingAdminDecision && !!liveCurrentBidderTeamId;
 
@@ -255,7 +260,7 @@ export default function CaptainDashboard() {
         return () => {
             isActive = false;
         };
-    }, [team?.id, auctionState?.current_player?.id, currentBid]);
+    }, [team?.id, auctionState?.current_player?.id]);
 
     useEffect(() => {
         setBidErrorMessage(null);
@@ -313,9 +318,9 @@ export default function CaptainDashboard() {
     let bidDisabledReason = '';
     if (!isAuctionLive) bidDisabledReason = 'Auction is paused';
     else if (!isPlayerOnBlock) bidDisabledReason = 'Waiting for player';
+    else if (auctionState?.is_paused) bidDisabledReason = 'Auction is paused';
     else if (isAwaitingAdminDecision) bidDisabledReason = 'Bidding closed — awaiting admin decision';
     else if (isHighestBidder) bidDisabledReason = 'You are the highest bidder!';
-    else if (isEligibilityLoading) bidDisabledReason = 'Syncing live bid access...';
     else if (!categoryEligibility.eligible) bidDisabledReason = categoryEligibility.reason || 'Category limit reached';
     else if (maxBid !== null && nextBid > maxBid) bidDisabledReason = `Max bid is ₹${maxBid.toLocaleString()}`;
     else if (!bidEligibility.canBid && bidEligibility.reasons.length > 0) bidDisabledReason = bidEligibility.reasons[0];
@@ -714,17 +719,18 @@ export default function CaptainDashboard() {
                                                     <span className="flex items-center justify-center gap-4 text-xl md:text-2xl"><Loader2 className="w-8 h-8 animate-spin" /> Placing bid...</span>
                                                     <span className="mt-2 text-xs tracking-[0.25em] uppercase opacity-70">Please wait — live bid is being submitted</span>
                                                 </>
-                                            ) : showBidAccessLoading ? (
-                                                <>
-                                                    <span className="flex items-center justify-center gap-4 text-base md:text-lg tracking-[0.2em] font-black uppercase"><Loader2 className="w-6 h-6 animate-spin" /> Syncing live bid access...</span>
-                                                    <span className="mt-2 text-xs tracking-[0.25em] uppercase opacity-60">Checking purse, limits, and live eligibility</span>
-                                                </>
                                             ) : bidDisabledReason ? (
                                                 <span className="flex items-center justify-center gap-4 text-sm md:text-base tracking-[0.3em] font-black"><AlertCircle className="w-6 h-6" /> {bidDisabledReason.toUpperCase()}</span>
                                             ) : (
                                                 <>
                                                     <span className="text-xs tracking-[0.45em] mb-1 opacity-70">AUTHORIZE NEXT ENTRY</span>
                                                     <span className="flex items-center gap-4">BID ₹{nextBid.toLocaleString()} <Zap className="w-8 h-8 fill-black" /></span>
+                                                    {showBidAccessLoading && (
+                                                        <span className="mt-2 flex items-center gap-2 text-[11px] tracking-[0.22em] uppercase opacity-60">
+                                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                                            Syncing live eligibility in background
+                                                        </span>
+                                                    )}
                                                 </>
                                             )}
                                         </div>
