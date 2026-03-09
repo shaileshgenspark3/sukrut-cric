@@ -2556,6 +2556,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (auctionState?.current_player_id) {
             try {
                 await markPlayerUnsold(auctionState.current_player_id);
+                queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
                 setExpiryHandledPlayerId(null);
                 window.dispatchEvent(new CustomEvent("timer-restart"));
             } catch (error: any) {
@@ -2570,6 +2572,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (auctionState?.current_player_id) {
             try {
                 await reAuctionPlayer(auctionState.current_player_id);
+                queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
                 setExpiryHandledPlayerId(null);
                 window.dispatchEvent(new CustomEvent("timer-restart"));
                 setShowExpiryModal(false);
@@ -2588,13 +2592,15 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             return;
         }
         
-        try {
-            await resetAuction();
-            alert('Auction has been reset. Player removed from auction.');
-            setExpiryHandledPlayerId(null);
-        } catch (error: any) {
-            alert(error.message || 'Failed to reset auction');
-        }
+            try {
+                await resetAuction();
+                queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+                alert('Auction has been reset. Player removed from auction.');
+                setExpiryHandledPlayerId(null);
+            } catch (error: any) {
+                alert(error.message || 'Failed to reset auction');
+            }
     };
 
     const handleExpiryConfirmSale = async () => {
@@ -2604,25 +2610,26 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             return;
         }
 
-        try {
-            await finalizeSale(
-                auctionState.current_player_id,
-                auctionState.current_bidder_team_id,
-                auctionState.current_bid_amount || auctionState.current_base_price
-            );
-            // Trigger confetti
-            confetti({
-                particleCount: 150,
-                spread: 70,
-                origin: { y: 0.6 },
-                colors: ['#FFD700', '#FFFFFF', '#3b82f6']
-            });
-            setExpiryHandledPlayerId(null);
-            window.dispatchEvent(new CustomEvent("timer-restart"));
-            setShowExpiryModal(false);
-        } catch (error: any) {
-            alert(error.message || 'Failed to finalize sale');
-        }
+            try {
+                await finalizeSale(
+                    auctionState.current_player_id,
+                    auctionState.current_bidder_team_id,
+                    auctionState.current_bid_amount || auctionState.current_base_price
+                );
+                confetti({
+                    particleCount: 150,
+                    spread: 70,
+                    origin: { y: 0.6 },
+                    colors: ['#FFD700', '#FFFFFF', '#3b82f6']
+                });
+                queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+                setExpiryHandledPlayerId(null);
+                window.dispatchEvent(new CustomEvent("timer-restart"));
+                setShowExpiryModal(false);
+            } catch (error: any) {
+                alert(error.message || 'Failed to finalize sale');
+            }
     };
 
     const handleExpiryModifyBid = () => {
