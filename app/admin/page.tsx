@@ -2640,11 +2640,11 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         !!liveBidderTeamId ||
         (auctionState?.bid_count || 0) > 0 ||
         liveBidAmount > (auctionState?.current_base_price || 0);
-    const isLiveAuctionTimerActive =
-        !!auctionState?.current_player_id &&
-        !!auctionState?.timer_end &&
-        (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid');
-    const isAwaitingExpiryDecision = isLiveAuctionTimerActive && totalSeconds === 0;
+    const hasActiveAuctionPlayer = !!auctionState?.current_player_id;
+    const isAwaitingExpiryDecision =
+        hasActiveAuctionPlayer &&
+        (isExpired || totalSeconds === 0) &&
+        auctionState?.status !== 'idle';
     const canConfirmCurrentSale = !!auctionState?.current_player_id && !!liveBidderTeamId;
 
     // Import eligibility functions
@@ -2718,21 +2718,16 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     }, [auctionState?.first_bid_timer_seconds, auctionState?.subsequent_bid_timer_seconds]);
 
     // Expiry modal state - shows when timer expires
-    const [showExpiryModal, setShowExpiryModal] = useState(false);
-    const [expiryModalType, setExpiryModalType] = useState<'no_bids' | 'has_bids'>('no_bids');
-    const [expiryHandledPlayerId, setExpiryHandledPlayerId] = useState<string | null>(null);
     const [resolvingExpiryAction, setResolvingExpiryAction] = useState(false);
     
     // Deploy confirmation modal
     const [showDeployConfirm, setShowDeployConfirm] = useState(false);
     const [playerToDeploy, setPlayerToDeploy] = useState<any>(null);
-    
-    // Modify bid modal
-    const [showModifyBid, setShowModifyBid] = useState(false);
-    const [modifyBidAmount, setModifyBidAmount] = useState<number>(0);
-    const [modifyTeamId, setModifyTeamId] = useState<string>('');
-    const [liveActionState, setLiveActionState] = useState<null | 'confirm_sale' | 're_auction' | 'keep_for_later'>(null);
     const expiryFreezeRequestedPlayerRef = useRef<string | null>(null);
+    const expiryPromptedPlayerRef = useRef<string | null>(null);
+    const expiryDecisionPanelRef = useRef<HTMLDivElement | null>(null);
+    const primaryExpiryActionRef = useRef<HTMLButtonElement | null>(null);
+    const [expirySpotlightActive, setExpirySpotlightActive] = useState(false);
 
     // Track previous status for detecting transitions
     const [previousStatus, setPreviousStatus] = useState<string>('');
@@ -2792,68 +2787,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         await invalidateAuctionDerivedData();
     }, [clearAuctionStateInCache, invalidateAuctionDerivedData]);
 
-    const runLiveAction = useCallback(
-        async (
-            action: 'confirm_sale' | 're_auction' | 'keep_for_later',
-            work: () => Promise<void>
-        ) => {
-            setLiveActionState(action);
-            try {
-                await work();
-            } finally {
-                setLiveActionState(null);
-            }
-        },
-        []
-    );
-
-    const openExpiryDecisionModal = useCallback(
-        (playerId: string) => {
-            setExpiryModalType(hasLiveBidSignal ? 'has_bids' : 'no_bids');
-            setExpiryHandledPlayerId(playerId);
-        },
-        [hasLiveBidSignal]
-    );
-
-    // Listen for timer expiry event
-    useEffect(() => {
-        const handleExpiry = (e: Event) => {
-            const playerId = auctionState?.current_player_id;
-            if (!playerId) return;
-            if (!auctionState?.timer_end) return;
-            if (expiryHandledPlayerId === playerId) return;
-
-            openExpiryDecisionModal(playerId);
-        };
-
-        window.addEventListener("timer-expiry", handleExpiry);
-        return () => window.removeEventListener("timer-expiry", handleExpiry);
-    }, [auctionState?.current_player_id, auctionState?.timer_end, expiryHandledPlayerId, openExpiryDecisionModal]);
-
-    // Timer expiry detection - monitor totalSeconds (without queryClient)
-    useEffect(() => {
-        const playerId = auctionState?.current_player_id;
-        if (!playerId) {
-            setExpiryHandledPlayerId(null);
-            return;
-        }
-
-        if (totalSeconds === 0 &&
-            !!auctionState?.timer_end &&
-            (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid') &&
-            expiryHandledPlayerId !== playerId
-        ) {
-            openExpiryDecisionModal(playerId);
-        }
-    }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.timer_end, expiryHandledPlayerId, openExpiryDecisionModal]);
-
-    useEffect(() => {
-        const playerId = auctionState?.current_player_id;
-        if (!playerId || !showExpiryModal || expiryHandledPlayerId !== playerId) return;
-
-        setExpiryModalType(hasLiveBidSignal ? 'has_bids' : 'no_bids');
-    }, [auctionState?.current_player_id, expiryHandledPlayerId, hasLiveBidSignal, showExpiryModal]);
-
     useEffect(() => {
         const playerId = auctionState?.current_player_id;
         if (!playerId) {
@@ -2886,12 +2819,39 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
 
     useEffect(() => {
         if (!auctionState?.current_player_id || auctionState?.status === 'idle') {
-            setShowExpiryModal(false);
-            setShowModifyBid(false);
             setResolvingExpiryAction(false);
             expiryFreezeRequestedPlayerRef.current = null;
+            expiryPromptedPlayerRef.current = null;
+            setExpirySpotlightActive(false);
         }
     }, [auctionState?.current_player_id, auctionState?.status]);
+
+    useEffect(() => {
+        const playerId = auctionState?.current_player_id;
+        if (!playerId || !isAwaitingExpiryDecision || expiryPromptedPlayerRef.current === playerId) {
+            return;
+        }
+
+        expiryPromptedPlayerRef.current = playerId;
+        setExpirySpotlightActive(true);
+
+        const scrollTimer = window.setTimeout(() => {
+            expiryDecisionPanelRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+            primaryExpiryActionRef.current?.focus();
+        }, 120);
+
+        const spotlightTimer = window.setTimeout(() => {
+            setExpirySpotlightActive(false);
+        }, 2200);
+
+        return () => {
+            window.clearTimeout(scrollTimer);
+            window.clearTimeout(spotlightTimer);
+        };
+    }, [auctionState?.current_player_id, isAwaitingExpiryDecision]);
 
     const [playerSearch, setPlayerSearch] = useState("");
     const [playerCategoryFilter, setPlayerCategoryFilter] = useState("All");
@@ -2994,12 +2954,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (auctionState?.current_player_id) {
             try {
                 setResolvingExpiryAction(true);
-                setShowExpiryModal(false);
-                setExpiryHandledPlayerId(auctionState.current_player_id);
                 await deferCurrentPlayerFromLiveAuction();
             } catch (error: any) {
                 await invalidateAuctionDerivedData();
-                setShowExpiryModal(true);
                 alert(error.message || 'Failed to keep player unsold for now');
             } finally {
                 setResolvingExpiryAction(false);
@@ -3012,20 +2969,16 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (auctionState?.current_player_id) {
             try {
                 setResolvingExpiryAction(true);
-                setShowExpiryModal(false);
-                setExpiryHandledPlayerId(auctionState.current_player_id);
                 await reAuctionPlayer(auctionState.current_player_id);
                 await invalidateAuctionDerivedData();
             } catch (error: any) {
                 await invalidateAuctionDerivedData();
-                setShowExpiryModal(true);
                 alert(error.message || 'Failed to re-auction player');
             } finally {
                 setResolvingExpiryAction(false);
             }
         } else {
             alert('No player currently in auction');
-            setShowExpiryModal(false);
         }
     };
 
@@ -3052,122 +3005,10 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             });
             await invalidateAuctionDerivedData();
             window.dispatchEvent(new CustomEvent("timer-restart"));
-            setShowExpiryModal(false);
         } catch (error: any) {
             alert(error.message || 'Failed to confirm sale');
         } finally {
             setResolvingExpiryAction(false);
-        }
-    };
-
-    const handleExpiryModifyBid = () => {
-        // Open modify bid modal
-        setModifyBidAmount(liveBidAmount || auctionState?.current_base_price || 0);
-        setModifyTeamId(liveBidderTeamId || '');
-        setShowExpiryModal(false);
-        setShowModifyBid(true);
-    };
-
-    const confirmModifyBid = async () => {
-        if (!auctionState?.current_player_id) return;
-
-        try {
-            const teamId = modifyTeamId || liveBidderTeamId;
-            const amount = modifyBidAmount;
-
-            if (!teamId) {
-                throw new Error('No winning bidder selected');
-            }
-            
-            await finalizeSale(auctionState.current_player_id, teamId, amount);
-            clearAuctionStateInCache();
-            await invalidateAuctionDerivedData();
-            
-            // Trigger confetti
-            confetti({
-                particleCount: 150,
-                spread: 70,
-                origin: { y: 0.6 },
-                colors: ['#FFD700', '#FFFFFF', '#3b82f6']
-            });
-            
-            setShowModifyBid(false);
-        } catch (error: any) {
-            alert(error.message || 'Failed to confirm sale');
-        }
-    };
-
-    const markSold = async () => {
-        if (!auctionState?.current_player_id || !liveBidderTeamId) return;
-
-        try {
-            await runLiveAction('confirm_sale', async () => {
-                const { enforceMaxPlayersPerTeam } = await import('@/lib/validation/rosterRules');
-                await enforceMaxPlayersPerTeam(liveBidderTeamId);
-
-                await finalizeSale(
-                    auctionState.current_player_id,
-                    liveBidderTeamId,
-                    liveBidAmount || auctionState.current_base_price
-                );
-                clearAuctionStateInCache();
-                await invalidateAuctionDerivedData();
-
-                confetti({
-                    particleCount: 150,
-                    spread: 70,
-                    origin: { y: 0.6 },
-                    colors: ['#FFD700', '#FFFFFF', '#3b82f6']
-                });
-            });
-        } catch (err: any) {
-            alert(err.message || 'Failed to confirm sale');
-        }
-    };
-
-    const handleKeepUnsoldForNowDetailed = async () => {
-        if (!auctionState?.current_player_id) return;
-
-        const currentPlayerName = auctionState?.current_player?.name || 'this player';
-        const currentBidAmount = liveBidAmount || auctionState?.current_base_price;
-        const bidderName = liveBidder?.team_name;
-        const hasActiveBids = !!liveBidderTeamId || (auctionState?.bid_count || 0) > 0;
-
-        const confirmationMessage = hasActiveBids
-            ? `Keep ${currentPlayerName} unsold for now? ${bidderName ? `${bidderName} is currently leading at ₹${currentBidAmount?.toLocaleString()}. ` : ''}This will remove the player from the live auction without recording a sale. You can auction the player again later.`
-            : `Keep ${currentPlayerName} unsold for now? This will remove the player from the live auction and keep the player available to auction later.`;
-
-        if (!window.confirm(confirmationMessage)) {
-            return;
-        }
-
-        try {
-            await runLiveAction('keep_for_later', deferCurrentPlayerFromLiveAuction);
-        } catch (err: any) {
-            alert(err.message || 'Failed to keep player unsold for now');
-        }
-    };
-
-    const handleLiveReauction = async () => {
-        if (!auctionState?.current_player_id) return;
-
-        const currentPlayerName = auctionState?.current_player?.name || 'this player';
-        const shouldRestart = window.confirm(
-            `Restart bidding for ${currentPlayerName} from the base price? This will clear the current live bid for this round and start a fresh timer.`
-        );
-
-        if (!shouldRestart) {
-            return;
-        }
-
-        try {
-            await runLiveAction('re_auction', async () => {
-                await reAuctionPlayer(auctionState.current_player_id);
-                await invalidateAuctionDerivedData();
-                window.dispatchEvent(new CustomEvent("timer-restart"));
-            });
-        } catch (error: any) {
-            alert(error.message || 'Failed to re-auction player');
         }
     };
 
@@ -3371,14 +3212,23 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                         </div>
                                     )}
 
+                                    <div ref={expiryDecisionPanelRef} className="mt-auto mb-3 scroll-mt-32">
+                                        <p className="text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black">
+                                            Live Decision Controls
+                                        </p>
+                                    </div>
+
                                     {/* Expiry Decision Actions */}
                                     {isAwaitingExpiryDecision ? (
                                         hasLiveBidSignal ? (
                                             <div className="mt-auto space-y-3">
                                                 <button
+                                                    ref={primaryExpiryActionRef}
                                                     onClick={handleExpiryConfirmSale}
                                                     disabled={!canConfirmCurrentSale || resolvingExpiryAction}
-                                                    className="group w-full bg-green-500 hover:bg-green-400 text-black font-display font-black py-6 rounded-2xl disabled:opacity-30 transition-all flex items-center justify-center gap-3 text-xl tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-95 uppercase"
+                                                    className={`group w-full bg-green-500 hover:bg-green-400 text-black font-display font-black py-6 rounded-2xl disabled:opacity-30 transition-all flex items-center justify-center gap-3 text-xl tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-95 uppercase focus:outline-none focus:ring-4 focus:ring-green-300/70 focus:ring-offset-2 focus:ring-offset-slate-950 ${
+                                                        expirySpotlightActive ? 'ring-4 ring-green-300/80 ring-offset-2 ring-offset-slate-950 shadow-[0_0_0_3px_rgba(134,239,172,0.18),0_16px_40px_rgba(34,197,94,0.35)] animate-pulse' : ''
+                                                    }`}
                                                 >
                                                     {resolvingExpiryAction ? (
                                                         <Loader2 className="w-6 h-6 animate-spin" />
@@ -3395,9 +3245,12 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                             <>
                                                 <div className="grid grid-cols-1 gap-4 mt-auto lg:grid-cols-2">
                                                     <button
+                                                        ref={primaryExpiryActionRef}
                                                         onClick={handleExpiryReauction}
                                                         disabled={resolvingExpiryAction}
-                                                        className="group bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase disabled:opacity-30"
+                                                        className={`group bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase disabled:opacity-30 focus:outline-none focus:ring-4 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-slate-950 ${
+                                                            expirySpotlightActive ? 'ring-4 ring-primary/70 ring-offset-2 ring-offset-slate-950 shadow-[0_0_0_3px_rgba(59,130,246,0.15),0_16px_40px_rgba(59,130,246,0.22)] animate-pulse' : ''
+                                                        }`}
                                                     >
                                                         {resolvingExpiryAction ? (
                                                             <Loader2 className="w-6 h-6 animate-spin" />
@@ -3430,14 +3283,42 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                             </>
                                         )
                                     ) : (
-                                        <div className="mt-auto rounded-2xl border border-dashed border-white/10 bg-slate-900/40 px-5 py-4">
-                                            <p className="text-[10px] text-slate-500 uppercase tracking-[0.28em] font-black">
-                                                Decision Controls Locked
-                                            </p>
-                                            <p className="mt-2 text-sm text-slate-400">
-                                                Confirm Sale / Re-Auction / Keep Unsold will unlock automatically when the live timer reaches 00:00.
-                                            </p>
-                                        </div>
+                                        <>
+                                            <div className="grid grid-cols-1 gap-4 mt-auto lg:grid-cols-3">
+                                                <button
+                                                    disabled
+                                                    className="group bg-green-500/10 text-green-200/50 border border-green-500/20 font-display font-black py-6 rounded-2xl opacity-60 cursor-not-allowed flex items-center justify-center gap-3 text-xl tracking-widest uppercase"
+                                                >
+                                                    <CheckCircle className="w-6 h-6" />
+                                                    Confirm Sale
+                                                </button>
+                                                <button
+                                                    disabled
+                                                    className="group bg-primary/10 text-primary/50 border border-primary/20 font-display font-black py-6 rounded-2xl opacity-60 cursor-not-allowed flex items-center justify-center gap-3 text-xl tracking-widest uppercase"
+                                                >
+                                                    <Gavel className="w-6 h-6" />
+                                                    Re-Auction
+                                                </button>
+                                                <button
+                                                    disabled
+                                                    className="group bg-amber-500/10 text-amber-200/50 border border-amber-500/20 font-display font-black py-6 rounded-2xl opacity-60 cursor-not-allowed flex items-center justify-center gap-3 text-xl tracking-widest uppercase"
+                                                >
+                                                    <RotateCcw className="w-6 h-6" />
+                                                    Keep Unsold
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-4 mt-3 lg:grid-cols-3">
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-[0.24em] leading-relaxed">
+                                                    Unlocks only after timer ends with a winning bid.
+                                                </p>
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-[0.24em] leading-relaxed">
+                                                    Unlocks only after timer ends with no winning bid.
+                                                </p>
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-[0.24em] leading-relaxed">
+                                                    Unlocks only after timer ends with no winning bid.
+                                                </p>
+                                            </div>
+                                        </>
                                     )}
                                 </motion.div>
                             ) : (
@@ -3836,138 +3717,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 </div>
             )}
 
-            {/* Timer Expiry Modal */}
-            {showExpiryModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className="glass-card bg-slate-900 border border-destructive/20 rounded-[2rem] p-8 max-w-lg w-full mx-4 shadow-2xl"
-                    >
-                        <div className="text-center">
-                            <div className="w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-destructive/20">
-                                <XCircle className="w-8 h-8 text-destructive" />
-                            </div>
-                            <h3 className="font-display text-2xl font-black text-white tracking-tight mb-2">TIME'S UP!</h3>
-                            
-                            {expiryModalType === 'no_bids' ? (
-                                <>
-                                    <p className="text-slate-400 font-sans mb-6">
-                                        No bids received for this player.<br/>
-                                        Keep the player unsold for now or immediately restart the auction.
-                                    </p>
-                                    <div className="flex gap-4">
-                                        <button
-                                            onClick={handleExpiryKeepUnsoldForNow}
-                                            disabled={resolvingExpiryAction}
-                                            className="flex-1 py-4 rounded-2xl bg-amber-500/10 text-amber-200 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-400/40 transition-all font-black tracking-widest"
-                                        >
-                                            {resolvingExpiryAction ? 'WORKING...' : 'KEEP UNSOLD FOR NOW'}
-                                        </button>
-                                        <button
-                                            onClick={handleExpiryReauction}
-                                            disabled={resolvingExpiryAction}
-                                            className="flex-1 py-4 rounded-2xl bg-gold text-black hover:bg-gold/90 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(255,215,0,0.2)]"
-                                        >
-                                            RE-AUCTION
-                                        </button>
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    <p className="text-slate-400 font-sans mb-2">
-                                        Auction completed! Current highest bid:
-                                    </p>
-                                    <p className="text-3xl font-display font-black text-gold mb-4">
-                                        ₹{liveBidAmount?.toLocaleString()}
-                                    </p>
-                                    <p className="text-white font-bold mb-6">
-                                        by {liveBidder?.team_name || 'Unknown Team'}
-                                    </p>
-                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                        <button
-                                            onClick={handleExpiryKeepUnsoldForNow}
-                                            disabled={resolvingExpiryAction}
-                                            className="py-4 rounded-2xl bg-amber-500/10 text-amber-200 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-400/40 transition-all font-black tracking-widest"
-                                        >
-                                            {resolvingExpiryAction ? 'WORKING...' : 'KEEP UNSOLD FOR NOW'}
-                                        </button>
-                                        <button
-                                            onClick={handleExpiryConfirmSale}
-                                            disabled={resolvingExpiryAction || !canConfirmCurrentSale}
-                                            className="py-4 rounded-2xl bg-green-500 text-white hover:bg-green-400 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)]"
-                                        >
-                                            {resolvingExpiryAction ? 'WORKING...' : 'CONFIRM SALE'}
-                                        </button>
-                                    </div>
-                                    <div className="mt-3">
-                                        <button
-                                            onClick={handleExpiryModifyBid}
-                                            disabled={resolvingExpiryAction}
-                                            className="w-full py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
-                                        >
-                                            MODIFY BID
-                                        </button>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    </motion.div>
-                </div>
-            )}
-
-            {/* Modify Bid Modal */}
-            {showModifyBid && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl">
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className="glass-card bg-slate-900 border border-white/10 rounded-[2rem] p-8 max-w-md w-full mx-4 shadow-2xl"
-                    >
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="font-display text-2xl font-black text-white tracking-tight">MODIFY SALE</h3>
-                            <button onClick={() => setShowModifyBid(false)} className="text-slate-400 hover:text-white">
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-
-                        <div className="space-y-6">
-                            <div className="space-y-2">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4">
-                                    Final Bid Amount (₹)
-                                </label>
-                                <input
-                                    type="number"
-                                    value={modifyBidAmount}
-                                    onChange={(e) => setModifyBidAmount(parseInt(e.target.value) || 0)}
-                                    className="w-full bg-slate-950 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-gold/50 transition-all"
-                                />
-                            </div>
-
-                            <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl">
-                                <p className="text-yellow-500 text-sm font-medium">
-                                    Warning: Modifying the bid from the actual highest bid will be recorded as-is.
-                                </p>
-                            </div>
-
-                            <div className="flex gap-4 pt-4">
-                                <button
-                                    onClick={() => setShowModifyBid(false)}
-                                    className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
-                                >
-                                    CANCEL
-                                </button>
-                                <button
-                                    onClick={confirmModifyBid}
-                                    className="flex-1 py-4 rounded-2xl bg-green-500 text-white hover:bg-green-400 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)]"
-                                >
-                                    CONFIRM SALE
-                                </button>
-                            </div>
-                        </div>
-                    </motion.div>
-                </div>
-            )}
         </div>
     );
 }
