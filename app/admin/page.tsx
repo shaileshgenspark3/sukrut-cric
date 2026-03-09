@@ -2498,6 +2498,14 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         }
     }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.bid_count, auctionState?.timer_end, expiryHandledPlayerId]);
 
+    useEffect(() => {
+        if (!auctionState?.current_player_id || auctionState?.status === 'idle') {
+            setShowExpiryModal(false);
+            setShowModifyBid(false);
+            setResolvingExpiryAction(false);
+        }
+    }, [auctionState?.current_player_id, auctionState?.status]);
+
     const [playerSearch, setPlayerSearch] = useState("");
     const [playerCategoryFilter, setPlayerCategoryFilter] = useState("All");
     const [playerRoleFilter, setPlayerRoleFilter] = useState("All");
@@ -2575,6 +2583,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
 
         try {
             await deployPlayer(playerToDeploy.id);
+            await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+            await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+            await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
             // Timer is already started by deployPlayer via RPC, no need to call startTimer again
             setShowDeployConfirm(false);
             setPlayerToDeploy(null);
@@ -2676,8 +2687,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                     origin: { y: 0.6 },
                     colors: ['#FFD700', '#FFFFFF', '#3b82f6']
                 });
-                queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+                await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
                 window.dispatchEvent(new CustomEvent("timer-restart"));
                 setShowExpiryModal(false);
             } catch (error: any) {
@@ -2729,6 +2741,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 auctionState.current_bidder_team_id,
                 auctionState.current_bid_amount || auctionState.current_base_price
             );
+            await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+            await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+            await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
             
             // Trigger confetti
             confetti({

@@ -209,6 +209,7 @@ export async function markPlayerUnsold(playerId: string) {
         current_player_id: null,
         current_base_price: null,
         current_bid_amount: null,
+        current_bid: 0,
         bid_count: 0,
         status: "idle",
         current_bidder_team_id: null,
@@ -382,9 +383,13 @@ export async function finalizeSale(
         current_player_id: null,
         current_base_price: null,
         current_bid_amount: null,
+        current_bid: 0,
         bid_count: 0,
         status: "idle",
         current_bidder_team_id: null,
+        timer_end: null,
+        is_paused: false,
+        paused_at: null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", auctionState.id);
@@ -509,8 +514,12 @@ export async function resetAuction() {
         current_player_id: null,
         current_base_price: null,
         current_bid_amount: null,
+        current_bid: 0,
         current_bidder_team_id: null,
         bid_count: 0,
+        timer_end: null,
+        is_paused: false,
+        paused_at: null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", auctionState.id);

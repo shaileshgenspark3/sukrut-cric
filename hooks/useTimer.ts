@@ -79,6 +79,11 @@ export function useTimer(): UseTimerReturn {
 
   const [isRunning, setIsRunning] = useState(false);
 
+  useEffect(() => {
+    const initial = getInitialRemainingSeconds();
+    setLocalTimer(formatTimerDisplay(Math.max(0, initial)));
+  }, [getInitialRemainingSeconds]);
+
   // Sync timer with database periodically
   useEffect(() => {
     syncIntervalRef.current = setInterval(() => {

@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 
 export function useRealtimeSubscription(table: string, queryKeys: string[]) {
     const queryClient = useQueryClient();
+    const queryKeyToken = queryKeys.join('::');
 
     useEffect(() => {
         const channel = supabase
@@ -20,5 +21,5 @@ export function useRealtimeSubscription(table: string, queryKeys: string[]) {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [table, queryKeys, queryClient]);
+    }, [table, queryKeyToken, queryClient]);
 }
