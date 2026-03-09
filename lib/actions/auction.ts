@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase-admin";
 import { revalidatePath } from "next/cache";
 import { clearBansForPlayer } from "@/lib/actions/admin";
 import { createLogEntry } from "@/lib/actions/logging";

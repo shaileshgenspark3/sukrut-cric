@@ -1,6 +1,6 @@
 "use server";
 
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase-admin";
 import { revalidatePath } from "next/cache";
 
 export async function manualPurseDeduction(teamId: string, amount: number, reason: string) {
