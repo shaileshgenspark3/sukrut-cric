@@ -136,6 +136,7 @@ export default function CaptainDashboard() {
                 .single();
             return data;
         },
+        refetchInterval: 10000,
     });
 
     const { data: roster } = useQuery({
@@ -159,13 +160,8 @@ export default function CaptainDashboard() {
     const effectivePurse = basePurse - captainDeduction;
     const availableTokens = rules?.current_purse ?? (effectivePurse - totalSpent);
 
-    const currentBid = getLiveAuctionBidAmount(auctionState);
-    const nextBid = getNextAuctionBidAmount(auctionState);
-    const soldPlayerCount = soldPlayerCountFallback;
-
     const isAuctionLive = settings?.is_auction_live;
     const isPlayerOnBlock = (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid') && auctionState?.current_player;
-    const isHighestBidder = auctionState?.current_bidder_team_id === team?.id;
     const playerGender = auctionState?.current_player?.gender;
     const currentPlayerId = auctionState?.current_player?.id || null;
 
@@ -177,6 +173,14 @@ export default function CaptainDashboard() {
         auctionState?.current_player?.id || null,
         auctionState?.auction_round ?? null
     );
+
+    const liveTopBid = topBids[0] || null;
+    const currentBid = liveTopBid?.bid_amount ?? getLiveAuctionBidAmount(auctionState);
+    const nextBid = liveTopBid ? liveTopBid.bid_amount + 25000 : getNextAuctionBidAmount(auctionState);
+    const liveCurrentBidderName = liveTopBid?.team_name ?? auctionState?.current_bidder?.team_name ?? null;
+    const liveCurrentBidderTeamId = liveTopBid?.team_id ?? auctionState?.current_bidder_team_id ?? null;
+    const isHighestBidder = liveCurrentBidderTeamId === team?.id;
+    const soldPlayerCount = soldPlayerCountFallback;
 
     // Max bid calculation for current player
     const [maxBid, setMaxBid] = useState<number | null>(null);
@@ -241,7 +245,7 @@ export default function CaptainDashboard() {
         return () => {
             isActive = false;
         };
-    }, [team?.id, auctionState?.current_player?.id, auctionState?.current_bid_amount]);
+    }, [team?.id, auctionState?.current_player?.id, currentBid]);
 
     useEffect(() => {
         setBidErrorMessage(null);
@@ -628,10 +632,10 @@ export default function CaptainDashboard() {
                                         </motion.p>
 
                                         <div className="min-h-[40px] flex items-center justify-center">
-                                            {auctionState.current_bidder?.team_name ? (
+                                            {liveCurrentBidderName ? (
                                                 <div className={`flex items-center gap-3 px-6 py-2 rounded-2xl border font-black tracking-widest text-xs uppercase animate-in slide-in-from-bottom-2 ${isHighestBidder ? 'bg-primary/20 border-primary/30 text-primary shadow-[0_0_20px_rgba(59,130,246,0.2)]' : 'bg-gold/10 border-gold/20 text-gold'}`}>
                                                     {isHighestBidder ? <Shield className="w-4 h-4" /> : <Trophy className="w-4 h-4" />}
-                                                    {isHighestBidder ? 'SECTOR SECURED BY YOU' : `CLAIMED BY: ${auctionState.current_bidder.team_name.toUpperCase()}`}
+                                                    {isHighestBidder ? 'SECTOR SECURED BY YOU' : `CLAIMED BY: ${liveCurrentBidderName.toUpperCase()}`}
                                                 </div>
                                             ) : (
                                                 <p className="text-slate-400 text-xs font-black uppercase tracking-[0.3em]">Sector Open for Entries</p>

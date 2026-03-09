@@ -2597,7 +2597,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const isLive = settings?.is_auction_live;
     const soldPlayersCount = players?.filter((p: any) => p.is_sold).length || 0;
     const showMaxBidVisibility = soldPlayersCount > 85;
-    const nextBidAmount = getNextAuctionBidAmount(auctionState);
     const { data: recentBids } = useQuery({ queryKey: ["recent_bids"], queryFn: async () => (await supabase.from("bids").select("*, team:teams(*), player:players(*)").order("created_at", { ascending: false }).limit(20)).data });
 
     useRealtimeSubscription('dashboard_presence', ['dashboard_live_count']);
@@ -2622,6 +2621,20 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         auctionState?.current_player?.id || null,
         auctionState?.auction_round ?? null
     );
+    const liveTopBid = topBids[0] || null;
+    const liveBidAmount = liveTopBid?.bid_amount ?? getLiveAuctionBidAmount(auctionState);
+    const liveBidderTeamId = liveTopBid?.team_id ?? auctionState?.current_bidder_team_id ?? null;
+    const liveBidder =
+        liveTopBid
+            ? {
+                id: liveTopBid.team_id,
+                team_name: liveTopBid.team_name,
+                team_logo_url: liveTopBid.team_logo_url,
+                captain_name: liveTopBid.captain_name,
+                captain_image_url: liveTopBid.captain_image_url,
+            }
+            : auctionState?.current_bidder;
+    const nextBidAmount = liveTopBid ? liveTopBid.bid_amount + 25000 : getNextAuctionBidAmount(auctionState);
 
     // Import eligibility functions
     const [teamEligibility, setTeamEligibility] = useState<any[]>([]);
@@ -2650,7 +2663,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         };
 
         fetchEligibility();
-    }, [auctionState?.current_player?.id, teams, auctionState?.current_bid_amount]);
+    }, [auctionState?.current_player?.id, teams, liveBidAmount]);
 
     const isTeamBanned = (teamId: string) => {
         return bannedTeams.some((ban: any) => ban.teamId === teamId);
@@ -2707,6 +2720,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const [showModifyBid, setShowModifyBid] = useState(false);
     const [modifyBidAmount, setModifyBidAmount] = useState<number>(0);
     const [modifyTeamId, setModifyTeamId] = useState<string>('');
+    const [liveActionState, setLiveActionState] = useState<null | 'confirm_sale' | 're_auction' | 'keep_for_later'>(null);
 
     // Track previous status for detecting transitions
     const [previousStatus, setPreviousStatus] = useState<string>('');
@@ -2765,6 +2779,21 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         clearAuctionStateInCache();
         await invalidateAuctionDerivedData();
     }, [clearAuctionStateInCache, invalidateAuctionDerivedData]);
+
+    const runLiveAction = useCallback(
+        async (
+            action: 'confirm_sale' | 're_auction' | 'keep_for_later',
+            work: () => Promise<void>
+        ) => {
+            setLiveActionState(action);
+            try {
+                await work();
+            } finally {
+                setLiveActionState(null);
+            }
+        },
+        []
+    );
 
     // Listen for timer expiry event
     useEffect(() => {
@@ -2948,23 +2977,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         }
     };
 
-    // Keep player unsold for now - remove from live auction without a final sale result
-    const handleKeepUnsoldForNowQuick = async () => {
-        if (!confirm('Keep the current player unsold for now? This will remove the player from the live auction without recording a sale. You can auction the player again later.')) {
-            return;
-        }
-        
-        try {
-            await deferCurrentPlayerFromLiveAuction();
-            alert('Player removed from the live auction and kept unsold for now.');
-        } catch (error: any) {
-            alert(error.message || 'Failed to keep player unsold for now');
-        }
-    };
-
     const handleExpiryConfirmSale = async () => {
         // User confirmed sale at current bid
-        if (!auctionState?.current_player_id || !auctionState?.current_bidder_team_id) {
+        if (!auctionState?.current_player_id || !liveBidderTeamId) {
             alert('No winning bidder');
             return;
         }
@@ -2972,8 +2987,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             try {
                 await finalizeSale(
                     auctionState.current_player_id,
-                    auctionState.current_bidder_team_id,
-                    auctionState.current_bid_amount || auctionState.current_base_price
+                    liveBidderTeamId,
+                    liveBidAmount || auctionState.current_base_price
                 );
                 clearAuctionStateInCache();
                 confetti({
@@ -2992,8 +3007,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
 
     const handleExpiryModifyBid = () => {
         // Open modify bid modal
-        setModifyBidAmount(auctionState?.current_bid_amount || auctionState?.current_base_price || 0);
-        setModifyTeamId(auctionState?.current_bidder_team_id || '');
+        setModifyBidAmount(liveBidAmount || auctionState?.current_base_price || 0);
+        setModifyTeamId(liveBidderTeamId || '');
         setShowExpiryModal(false);
         setShowModifyBid(true);
     };
@@ -3002,8 +3017,12 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (!auctionState?.current_player_id) return;
 
         try {
-            const teamId = modifyTeamId || auctionState.current_bidder_team_id;
+            const teamId = modifyTeamId || liveBidderTeamId;
             const amount = modifyBidAmount;
+
+            if (!teamId) {
+                throw new Error('No winning bidder selected');
+            }
             
             await finalizeSale(auctionState.current_player_id, teamId, amount);
             clearAuctionStateInCache();
@@ -3024,27 +3043,27 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     };
 
     const markSold = async () => {
-        if (!auctionState?.current_player_id || !auctionState?.current_bidder_team_id) return;
+        if (!auctionState?.current_player_id || !liveBidderTeamId) return;
 
         try {
-            // Enforce roster limit before marking player as sold
-            const { enforceMaxPlayersPerTeam } = await import('@/lib/validation/rosterRules');
-            await enforceMaxPlayersPerTeam(auctionState.current_bidder_team_id);
+            await runLiveAction('confirm_sale', async () => {
+                const { enforceMaxPlayersPerTeam } = await import('@/lib/validation/rosterRules');
+                await enforceMaxPlayersPerTeam(liveBidderTeamId);
 
-            await finalizeSale(
-                auctionState.current_player_id,
-                auctionState.current_bidder_team_id,
-                auctionState.current_bid_amount || auctionState.current_base_price
-            );
-            clearAuctionStateInCache();
-            await invalidateAuctionDerivedData();
-            
-            // Trigger confetti
-            confetti({
-                particleCount: 150,
-                spread: 70,
-                origin: { y: 0.6 },
-                colors: ['#FFD700', '#FFFFFF', '#3b82f6']
+                await finalizeSale(
+                    auctionState.current_player_id,
+                    liveBidderTeamId,
+                    liveBidAmount || auctionState.current_base_price
+                );
+                clearAuctionStateInCache();
+                await invalidateAuctionDerivedData();
+
+                confetti({
+                    particleCount: 150,
+                    spread: 70,
+                    origin: { y: 0.6 },
+                    colors: ['#FFD700', '#FFFFFF', '#3b82f6']
+                });
             });
         } catch (err: any) {
             alert(err.message || 'Failed to confirm sale');
@@ -3055,9 +3074,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (!auctionState?.current_player_id) return;
 
         const currentPlayerName = auctionState?.current_player?.name || 'this player';
-        const currentBidAmount = auctionState?.current_bid_amount || auctionState?.current_base_price;
-        const bidderName = auctionState?.current_bidder?.team_name;
-        const hasActiveBids = !!auctionState?.current_bidder_team_id || (auctionState?.bid_count || 0) > 0;
+        const currentBidAmount = liveBidAmount || auctionState?.current_base_price;
+        const bidderName = liveBidder?.team_name;
+        const hasActiveBids = !!liveBidderTeamId || (auctionState?.bid_count || 0) > 0;
 
         const confirmationMessage = hasActiveBids
             ? `Keep ${currentPlayerName} unsold for now? ${bidderName ? `${bidderName} is currently leading at ₹${currentBidAmount?.toLocaleString()}. ` : ''}This will remove the player from the live auction without recording a sale. You can auction the player again later.`
@@ -3068,9 +3087,32 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         }
 
         try {
-            await deferCurrentPlayerFromLiveAuction();
+            await runLiveAction('keep_for_later', deferCurrentPlayerFromLiveAuction);
         } catch (err: any) {
             alert(err.message || 'Failed to keep player unsold for now');
+        }
+    };
+
+    const handleLiveReauction = async () => {
+        if (!auctionState?.current_player_id) return;
+
+        const currentPlayerName = auctionState?.current_player?.name || 'this player';
+        const shouldRestart = window.confirm(
+            `Restart bidding for ${currentPlayerName} from the base price? This will clear the current live bid for this round and start a fresh timer.`
+        );
+
+        if (!shouldRestart) {
+            return;
+        }
+
+        try {
+            await runLiveAction('re_auction', async () => {
+                await reAuctionPlayer(auctionState.current_player_id);
+                await invalidateAuctionDerivedData();
+                window.dispatchEvent(new CustomEvent("timer-restart"));
+            });
+        } catch (error: any) {
+            alert(error.message || 'Failed to re-auction player');
         }
     };
 
@@ -3092,27 +3134,15 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                         <p className="text-[10px] text-slate-500 font-black tracking-widest uppercase">Dashboard Live Count</p>
                         <p className="font-display font-black text-xl text-white tracking-widest">{liveDashboardCount}</p>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <button
-                            onClick={toggleAuctionState}
-                            className={`group flex items-center gap-3 px-8 py-4 rounded-2xl font-display font-black tracking-widest text-sm transition-all duration-500 ${isLive
-                                ? 'bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20'
-                                : 'bg-primary border text-white hover:scale-105 active:scale-95 glow-electric'
-                                }`}
-                        >
-                            {isLive ? <><PauseCircle className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" /> KILL ENGINE</> : <><PlayCircle className="w-5 h-5 group-hover:rotate-12 transition-transform" /> ACTIVATE ENGINE</>}
-                        </button>
-                        {auctionState?.current_player && (
-                            <button
-                                onClick={handleKeepUnsoldForNowQuick}
-                                className="flex items-center gap-2 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest border border-white/20 text-white bg-white/5 hover:bg-white/10 transition-all"
-                                title="Remove the current player from the live auction and keep them available for later"
-                            >
-                                <RotateCcw className="w-4 h-4" />
-                                Keep Unsold For Now
-                            </button>
-                        )}
-                    </div>
+                    <button
+                        onClick={toggleAuctionState}
+                        className={`group flex items-center gap-3 px-8 py-4 rounded-2xl font-display font-black tracking-widest text-sm transition-all duration-500 ${isLive
+                            ? 'bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20'
+                            : 'bg-primary border text-white hover:scale-105 active:scale-95 glow-electric'
+                            }`}
+                    >
+                        {isLive ? <><PauseCircle className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" /> KILL ENGINE</> : <><PlayCircle className="w-5 h-5 group-hover:rotate-12 transition-transform" /> ACTIVATE ENGINE</>}
+                    </button>
                 </div>
             </div>
 
@@ -3153,16 +3183,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                         ) : (
                                             <><PauseCircle className="w-4 h-4" /> Pause</>
                                         )}
-                                    </button>
-                                )}
-
-                                {/* Keep Unsold For Now Button */}
-                                {auctionState?.current_player && (
-                                    <button
-                                        onClick={handleKeepUnsoldForNowQuick}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 hover:bg-amber-500/20 font-display font-black text-[10px] uppercase tracking-widest transition-all"
-                                    >
-                                        <RotateCcw className="w-4 h-4" /> Keep Unsold For Now
                                     </button>
                                 )}
                             </div>
@@ -3231,9 +3251,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                             player={auctionState.current_player}
                                             basePrice={auctionState.current_base_price || 0}
                                             showBidInfo={true}
-                                            currentBid={getLiveAuctionBidAmount(auctionState)}
+                                            currentBid={liveBidAmount}
                                             bidCount={auctionState.bid_count || 0}
-                                            topBidder={auctionState.current_bidder}
+                                            topBidder={liveBidder}
                                         />
                                     </div>
 
@@ -3243,7 +3263,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                             <div>
                                                 <p className="text-slate-500 text-[10px] uppercase tracking-wider">Next Valid Bid</p>
                                                 <p className="text-primary font-bold text-lg">
-                                                    ₹{getNextAuctionBidAmount(auctionState).toLocaleString()}
+                                                    ₹{nextBidAmount.toLocaleString()}
                                                 </p>
                                             </div>
                                             <div className="text-right">
@@ -3253,25 +3273,51 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                         </div>
                                     </div>
 
-                                    {/* Sale Buttons */}
-                                    <div className="grid grid-cols-2 gap-6 mt-auto">
+                                    {/* Live Action Dock */}
+                                    <div className="grid grid-cols-1 gap-4 mt-auto lg:grid-cols-3">
                                         <button
                                             onClick={markSold}
-                                            disabled={!auctionState.current_bidder_team_id}
-                                            className="group bg-green-500 hover:bg-green-400 text-black font-display font-black py-6 rounded-2xl disabled:opacity-20 transition-all flex items-center justify-center gap-3 text-xl tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-95 uppercase"
+                                            disabled={!liveBidderTeamId || liveActionState !== null}
+                                            className="group bg-green-500 hover:bg-green-400 text-black font-display font-black py-6 rounded-2xl disabled:opacity-30 transition-all flex items-center justify-center gap-3 text-xl tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-95 uppercase"
                                         >
-                                            <CheckCircle className="w-6 h-6 group-hover:scale-125 transition-transform" /> Confirm Sale
+                                            {liveActionState === 'confirm_sale' ? (
+                                                <Loader2 className="w-6 h-6 animate-spin" />
+                                            ) : (
+                                                <CheckCircle className="w-6 h-6 group-hover:scale-125 transition-transform" />
+                                            )}
+                                            {liveActionState === 'confirm_sale' ? 'Confirming...' : 'Confirm Sale'}
+                                        </button>
+                                        <button
+                                            onClick={handleLiveReauction}
+                                            disabled={liveActionState !== null}
+                                            className="group bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase disabled:opacity-30"
+                                        >
+                                            {liveActionState === 're_auction' ? (
+                                                <Loader2 className="w-6 h-6 animate-spin" />
+                                            ) : (
+                                                <Gavel className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+                                            )}
+                                            {liveActionState === 're_auction' ? 'Restarting...' : 'Re-Auction'}
                                         </button>
                                         <button
                                             onClick={handleKeepUnsoldForNowDetailed}
-                                            className="group bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 border border-amber-500/20 hover:border-amber-400/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase"
+                                            disabled={liveActionState !== null}
+                                            className="group bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 border border-amber-500/20 hover:border-amber-400/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase disabled:opacity-30"
                                         >
-                                            <RotateCcw className="w-6 h-6 group-hover:-rotate-180 transition-transform duration-500" /> Keep Unsold For Now
+                                            {liveActionState === 'keep_for_later' ? (
+                                                <Loader2 className="w-6 h-6 animate-spin" />
+                                            ) : (
+                                                <RotateCcw className="w-6 h-6 group-hover:-rotate-180 transition-transform duration-500" />
+                                            )}
+                                            {liveActionState === 'keep_for_later' ? 'Holding...' : 'Keep for Later'}
                                         </button>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-6 mt-3">
+                                    <div className="grid grid-cols-1 gap-4 mt-3 lg:grid-cols-3">
                                         <p className="text-[10px] text-slate-500 uppercase tracking-[0.24em] leading-relaxed">
                                             Confirms the player for the current highest bidder and closes the auction.
+                                        </p>
+                                        <p className="text-[10px] text-primary/80 uppercase tracking-[0.24em] leading-relaxed">
+                                            Restarts this player immediately from the base price with a fresh live timer.
                                         </p>
                                         <p className="text-[10px] text-amber-200/80 uppercase tracking-[0.24em] leading-relaxed">
                                             Removes the player from the live block without a final result so you can auction again later.
@@ -3306,7 +3352,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                     bids={bids}
                                     topBids={topBids}
                                     historyBids={historyBids}
-                                    currentBidAmount={auctionState?.current_bid_amount}
+                                    currentBidAmount={liveBidAmount}
                                 />
                             ) : (
                                 <AnimatePresence initial={false}>
@@ -3717,10 +3763,10 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                         Auction completed! Current highest bid:
                                     </p>
                                     <p className="text-3xl font-display font-black text-gold mb-4">
-                                        ₹{auctionState?.current_bid_amount?.toLocaleString()}
+                                        ₹{liveBidAmount?.toLocaleString()}
                                     </p>
                                     <p className="text-white font-bold mb-6">
-                                        by {auctionState?.current_bidder?.team_name || 'Unknown Team'}
+                                        by {liveBidder?.team_name || 'Unknown Team'}
                                     </p>
                                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                         <button

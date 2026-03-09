@@ -2,7 +2,6 @@
 
 import { z } from "zod";
 import { supabaseAdmin as supabase } from "@/lib/supabase-admin";
-import { revalidatePath } from "next/cache";
 
 // Zod schemas for validation
 const StartTimerSchema = z.object({
@@ -29,10 +28,6 @@ export async function startTimer(initialSeconds?: number) {
       throw new Error(`Failed to start timer: ${error.message}`);
     }
 
-    // Revalidate pages that display timer
-    revalidatePath("/admin");
-    revalidatePath("/captain");
-
     return { success: true };
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -53,9 +48,6 @@ export async function pauseTimer() {
       throw new Error(`Failed to pause timer: ${error.message}`);
     }
 
-    revalidatePath("/admin");
-    revalidatePath("/captain");
-
     return { success: true };
   } catch (error) {
     throw error;
@@ -72,9 +64,6 @@ export async function resumeTimer() {
     if (error) {
       throw new Error(`Failed to resume timer: ${error.message}`);
     }
-
-    revalidatePath("/admin");
-    revalidatePath("/captain");
 
     return { success: true };
   } catch (error) {
@@ -103,9 +92,6 @@ export async function updateTimerSettings(
     if (error) {
       throw new Error(`Failed to update timer settings: ${error.message}`);
     }
-
-    revalidatePath("/admin");
-    revalidatePath("/captain");
 
     return { success: true };
   } catch (error) {

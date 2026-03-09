@@ -2,7 +2,6 @@
 
 import { z } from "zod";
 import { supabaseAdmin as supabase } from "@/lib/supabase-admin";
-import { revalidatePath } from "next/cache";
 import { validateBid, calculateMaxBid } from "@/lib/validation/bidValidation";
 import { isTeamBanned } from "@/lib/actions/admin";
 import { getNextAuctionBidAmount } from "@/lib/services/auction/bidMath";
@@ -112,9 +111,6 @@ export async function placeBidWithValidation(
     if (!bidResponse?.success) {
       throw new Error(bidResponse?.message || "Failed to place bid");
     }
-
-    revalidatePath("/admin");
-    revalidatePath("/captain");
 
     return { success: true, message: "Bid placed successfully" };
   } catch (error) {

@@ -1,8 +1,5 @@
-import { revalidatePath } from "next/cache";
-
 export function revalidateAuctionViews() {
-  revalidatePath("/");
-  revalidatePath("/dashboard");
-  revalidatePath("/admin");
-  revalidatePath("/captain");
+  // Auction surfaces are client-rendered and stay fresh through Supabase
+  // realtime + React Query. Avoiding server cache revalidation keeps admin
+  // actions noticeably faster during live bidding.
 }

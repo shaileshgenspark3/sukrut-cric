@@ -13,6 +13,7 @@ import Link from "next/link";
 const CATEGORIES = ["A+", "A", "B", "F"] as const;
 const STAR_LIMITS: Record<string, number> = { "A+": 1, A: 3, B: 4, F: 1 };
 const DASHBOARD_FONT = "'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif";
+const DASHBOARD_FALLBACK_REFETCH_MS = 15000;
 const SPONSOR_POPOUT_ANIMATION_MS = 5000;
 const HEARTBEAT_INTERVAL_MS = 15000;
 const PRESENCE_STALE_MS = 2 * 60 * 1000;
@@ -77,13 +78,13 @@ const getOrCreateDashboardSessionId = () => {
 };
 
 export default function LiveAuctionDashboard() {
-  useRealtimeSubscription("tournament_settings", ["dashboard"]);
-  useRealtimeSubscription("auction_state", ["dashboard"]);
-  useRealtimeSubscription("teams", ["dashboard"]);
-  useRealtimeSubscription("players", ["dashboard"]);
-  useRealtimeSubscription("auction_rules", ["dashboard"]);
-  useRealtimeSubscription("bids", ["dashboard"]);
-  useRealtimeSubscription("auction_log", ["dashboard"]);
+  useRealtimeSubscription("tournament_settings", ["dashboard", "settings"]);
+  useRealtimeSubscription("auction_state", ["dashboard", "auction_state"]);
+  useRealtimeSubscription("teams", ["dashboard", "teams"]);
+  useRealtimeSubscription("players", ["dashboard", "players"]);
+  useRealtimeSubscription("players", ["dashboard", "top_sold"]);
+  useRealtimeSubscription("auction_rules", ["dashboard", "rules"]);
+  useRealtimeSubscription("auction_log", ["dashboard", "auction_logs"]);
 
   const [showGrid, setShowGrid] = useState(false);
   const [showBrowseOverlay, setShowBrowseOverlay] = useState(false);
@@ -129,7 +130,7 @@ export default function LiveAuctionDashboard() {
         current_bidder: relationOne(source.current_bidder),
       };
     },
-    refetchInterval: 5000,
+    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: settings } = useQuery({
@@ -141,7 +142,7 @@ export default function LiveAuctionDashboard() {
         .single();
       return data;
     },
-    refetchInterval: 5000,
+    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: players = [] } = useQuery<any[]>({
@@ -153,7 +154,7 @@ export default function LiveAuctionDashboard() {
         .order("created_at", { ascending: true });
       return data || [];
     },
-    refetchInterval: 5000,
+    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: teams = [] } = useQuery<any[]>({
@@ -164,13 +165,13 @@ export default function LiveAuctionDashboard() {
           .from("teams")
           .select("id, team_name, captain_name, captain_image_url, team_logo_url")
       ).data || [],
-    refetchInterval: 5000,
+    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: rules = [] } = useQuery<any[]>({
     queryKey: ["dashboard", "rules"],
     queryFn: async () => (await supabase.from("auction_rules").select("*")).data || [],
-    refetchInterval: 5000,
+    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: auctionLogs = [] } = useQuery<any[]>({
@@ -182,7 +183,7 @@ export default function LiveAuctionDashboard() {
       }
       return response.json();
     },
-    refetchInterval: 5000,
+    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: topConfirmedSalePlayers = [] } = useQuery<any[]>({
@@ -196,7 +197,7 @@ export default function LiveAuctionDashboard() {
         .limit(10);
       return data || [];
     },
-    refetchInterval: 5000,
+    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const recentSales = useMemo(
@@ -208,14 +209,16 @@ export default function LiveAuctionDashboard() {
   );
 
   const currentPlayerId = auctionState?.current_player?.id || auctionState?.current_player_id || null;
+  const { topBids } = useBids(currentPlayerId, auctionState?.auction_round ?? null);
+  const liveTopBid = topBids[0] || null;
   const currentBid =
+    liveTopBid?.bid_amount ||
     auctionState?.current_bid_amount ||
     auctionState?.current_bid ||
     auctionState?.current_base_price ||
     auctionState?.current_player?.base_price ||
     0;
-
-  const { topBids } = useBids(currentPlayerId, auctionState?.auction_round ?? null);
+  const currentBidderName = liveTopBid?.team_name || auctionState?.current_bidder?.team_name || null;
   const { totalSeconds, isPaused } = useTimer();
 
   const playerStatusMap = useMemo(() => {
@@ -330,6 +333,14 @@ export default function LiveAuctionDashboard() {
     }
     return map;
   }, [standings]);
+
+  const latestResolvedOutcome = useMemo(
+    () => auctionLogs.find((log) => ["sold", "unsold", "manual"].includes(log.status)) || null,
+    [auctionLogs]
+  );
+  const latestResolvedPlayer = relationOne<any>(latestResolvedOutcome?.player);
+  const latestResolvedTeam = relationOne<any>(latestResolvedOutcome?.team);
+  const latestResolvedStatusLabel = getOutcomeLabel(latestResolvedOutcome?.status);
 
   const selectedTeamPlayers = useMemo(() => {
     if (!selectedTeamId) return [];
@@ -640,9 +651,9 @@ export default function LiveAuctionDashboard() {
                       <h3 className="text-xl font-semibold">{auctionState.current_player.name}</h3>
                       <p className="text-sm text-slate-500">Base Price: {formatMoney(auctionState.current_player.base_price || 0)}</p>
                       <p className="mt-1 text-lg font-semibold text-emerald-700">Current Bid: {formatMoney(currentBid)}</p>
-                      {auctionState?.current_bidder && (
+                      {currentBidderName && (
                         <p className="mt-1 text-xs text-slate-500">
-                          Highest bidder: <span className="font-semibold text-slate-700">{auctionState.current_bidder.team_name}</span>
+                          Highest bidder: <span className="font-semibold text-slate-700">{currentBidderName}</span>
                         </p>
                       )}
                     </div>
@@ -707,6 +718,53 @@ export default function LiveAuctionDashboard() {
                       ))
                     )}
                   </div>
+                </div>
+              </div>
+            ) : latestResolvedOutcome && latestResolvedPlayer ? (
+              <div className="space-y-4">
+                <div
+                  className={`rounded-2xl border p-4 ${
+                    latestResolvedOutcome.status === "unsold"
+                      ? "border-amber-200 bg-amber-50"
+                      : "border-emerald-200 bg-emerald-50"
+                  }`}
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <img
+                      src={latestResolvedPlayer.image_url || imageFallback(latestResolvedPlayer.name || "Player")}
+                      alt={latestResolvedPlayer.name || "Player"}
+                      className="h-24 w-24 rounded-2xl border border-white/80 bg-white object-cover"
+                    />
+                    <div className="flex-1">
+                      <div className="mb-2 flex flex-wrap gap-2 text-xs font-semibold">
+                        {latestResolvedStatusLabel && (
+                          <span className="rounded-full border border-current/20 bg-white/70 px-3 py-1">
+                            {latestResolvedStatusLabel}
+                          </span>
+                        )}
+                        <span className="rounded-full bg-white/70 px-3 py-1 text-slate-700">
+                          {latestResolvedPlayer.category || latestResolvedOutcome.category || "Category"}
+                        </span>
+                      </div>
+                      <h3 className="text-xl font-semibold text-slate-900">{latestResolvedPlayer.name || "Player"}</h3>
+                      <p className="mt-1 text-lg font-semibold text-slate-800">
+                        {latestResolvedOutcome.status === "unsold"
+                          ? "No winning bid registered"
+                          : `Final Bid: ${formatMoney(latestResolvedOutcome.sale_price || 0)}`}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {latestResolvedOutcome.status === "unsold"
+                          ? "Recent outcome will stay visible until the next player is ready."
+                          : `Won by ${latestResolvedTeam?.team_name || "Unknown Team"} • ${
+                              latestResolvedTeam?.captain_name || "Captain"
+                            }`}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
+                  Waiting for the next player to be deployed.
                 </div>
               </div>
             ) : (

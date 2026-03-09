@@ -26,9 +26,6 @@ const FinalizeSaleSchema = z.object({
  * Validates player eligibility and updates auction_state
  */
 export async function deployPlayer(playerId: string): Promise<{ success: boolean; message: string; playerId: string }> {
-  console.log('=== DEPLOY PLAYER START ===');
-  console.log('Player ID:', playerId);
-
   // Validate input first
   if (!playerId || typeof playerId !== 'string') {
     throw new Error('Invalid player ID provided');
@@ -36,18 +33,13 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
 
   try {
     const validated = DeployPlayerSchema.parse({ playerId });
-    console.log('Validated player ID:', validated.playerId);
 
     // 1. Validate player exists and is eligible (not sold, not captain)
-    console.log('Step 1: Fetching player...');
     const { data: player, error: playerError } = await supabase
       .from("players")
       .select("*")
       .eq("id", validated.playerId)
       .single();
-
-    console.log('Player data:', player);
-    console.log('Player error:', playerError);
 
     if (playerError) {
       throw new Error(`Player not found: ${playerError.message}`);
@@ -66,14 +58,10 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
     }
 
     // 2. Get auction_state to determine current state
-    console.log('Step 2: Fetching auction state...');
     const { data: auctionState, error: stateError } = await supabase
       .from("auction_state")
       .select("*")
       .single();
-
-    console.log('Auction state:', auctionState);
-    console.log('Auction state error:', stateError);
 
     if (stateError) {
       throw new Error(`Failed to fetch auction state: ${stateError.message}`);
@@ -86,10 +74,8 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
 
     // 3. Use auction_state timer settings as source of truth
     const timerSeconds = auctionState.first_bid_timer_seconds || 30;
-    console.log('Timer seconds:', timerSeconds);
 
     // 4. Update auction_state table
-    console.log('Step 4: Updating auction state...');
     const updateData = {
       auction_round: (auctionState.auction_round || 0) + 1,
       current_player_id: validated.playerId,
@@ -101,27 +87,21 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
       current_bidder_team_id: null,
       updated_at: new Date().toISOString(),
     };
-    console.log('Update data:', updateData);
     
     const { error: updateError } = await supabase
       .from("auction_state")
       .update(updateData)
       .eq("id", auctionState.id);
 
-    console.log('Update error:', updateError);
-
     if (updateError) {
       throw new Error(`Failed to deploy player: ${updateError.message}`);
     }
 
     // 5. Start the auction timer via RPC
-    console.log('Step 5: Starting auction timer...');
     try {
       const { error: timerError } = await supabase.rpc("start_auction_timer", {
         p_initial_seconds: timerSeconds,
       });
-
-      console.log('Timer RPC error:', timerError);
 
       if (timerError) {
         console.error("Timer start warning:", timerError.message);
@@ -132,16 +112,12 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
     }
 
     // 6. Revalidate admin and captain pages
-    console.log('Step 6: Revalidating paths...');
     try {
       revalidateAuctionViews();
-      console.log('Revalidated auction views');
     } catch (revalError: any) {
       console.error('Revalidation error:', revalError);
       // Don't throw on revalidation error - it's not critical
     }
-
-    console.log('=== DEPLOY PLAYER SUCCESS ===');
     return {
       success: true,
       message: `Player ${player.name} deployed to auction`,
@@ -554,8 +530,6 @@ export async function reAuctionPlayer(playerId: string) {
  */
 export async function resetAuction() {
   try {
-    console.log('=== RESET AUCTION ===');
-
     // Get auction state
     const { data: auctionState, error: stateError } = await supabase
       .from("auction_state")
@@ -590,15 +564,11 @@ export async function resetAuction() {
 
     // Revalidate pages
     revalidateAuctionViews();
-
-    console.log('=== AUCTION RESET SUCCESS ===');
     return {
       success: true,
       message: "Auction has been reset",
     };
   } catch (error: any) {
-    console.error('=== RESET AUCTION ERROR ===');
-    console.error('Error:', error);
     throw new Error(error.message || "Failed to reset auction");
   }
 }

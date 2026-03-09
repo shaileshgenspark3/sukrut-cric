@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { calculateRemainingSeconds, formatTimerDisplay } from "@/lib/services/timer/timerService";
 import { useRealtimeSubscription } from "@/hooks/useRealtime";
 
+const TIMER_FALLBACK_SYNC_MS = 15000;
+
 interface TimerState {
   timer_end: string | null;
   is_paused: boolean;
@@ -40,7 +42,6 @@ interface UseTimerReturn {
  * - On expiry, dispatches custom event
  */
 export function useTimer(): UseTimerReturn {
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const expiryDispatchedRef = useRef(false);
 
   useRealtimeSubscription("auction_state", ["auction_state", "timer"]);
@@ -59,8 +60,9 @@ export function useTimer(): UseTimerReturn {
       if (error) throw error;
       return data as unknown as TimerState & { status: string };
     },
-    refetchInterval: 5000, // Sync every 5 seconds
+    refetchInterval: TIMER_FALLBACK_SYNC_MS,
     refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 
   // Calculate initial remaining seconds from database
@@ -86,19 +88,6 @@ export function useTimer(): UseTimerReturn {
     const initial = getInitialRemainingSeconds();
     setLocalTimer(formatTimerDisplay(Math.max(0, initial)));
   }, [getInitialRemainingSeconds]);
-
-  // Sync timer with database periodically
-  useEffect(() => {
-    syncIntervalRef.current = setInterval(() => {
-      refetch();
-    }, 5000); // Sync every 5 seconds
-
-    return () => {
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
-    };
-  }, [refetch]);
 
   // Local countdown timer
   useEffect(() => {
