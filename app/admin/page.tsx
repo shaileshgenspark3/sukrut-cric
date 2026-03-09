@@ -2558,7 +2558,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 await markPlayerUnsold(auctionState.current_player_id);
                 queryClient.invalidateQueries({ queryKey: ["auction_state"] });
                 queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
-                setExpiryHandledPlayerId(null);
                 window.dispatchEvent(new CustomEvent("timer-restart"));
             } catch (error: any) {
                 alert(error.message || 'Failed to mark player as unsold');
@@ -2574,7 +2573,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 await reAuctionPlayer(auctionState.current_player_id);
                 queryClient.invalidateQueries({ queryKey: ["auction_state"] });
                 queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
-                setExpiryHandledPlayerId(null);
                 window.dispatchEvent(new CustomEvent("timer-restart"));
                 setShowExpiryModal(false);
             } catch (error: any) {
@@ -2597,7 +2595,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 queryClient.invalidateQueries({ queryKey: ["auction_state"] });
                 queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
                 alert('Auction has been reset. Player removed from auction.');
-                setExpiryHandledPlayerId(null);
             } catch (error: any) {
                 alert(error.message || 'Failed to reset auction');
             }
@@ -2624,7 +2621,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 });
                 queryClient.invalidateQueries({ queryKey: ["auction_state"] });
                 queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
-                setExpiryHandledPlayerId(null);
                 window.dispatchEvent(new CustomEvent("timer-restart"));
                 setShowExpiryModal(false);
             } catch (error: any) {
@@ -2694,6 +2690,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         
         try {
             await markPlayerUnsold(auctionState.current_player_id);
+            queryClient.invalidateQueries({ queryKey: ["auction_state"] });
+            queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+            window.dispatchEvent(new CustomEvent("timer-restart"));
         } catch (err: any) {
             alert(err.message || 'Failed to mark player as unsold');
         }
