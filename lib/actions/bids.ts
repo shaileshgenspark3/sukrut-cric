@@ -5,6 +5,7 @@ import { supabaseAdmin as supabase } from "@/lib/supabase-admin";
 import { revalidatePath } from "next/cache";
 import { validateBid, calculateMaxBid } from "@/lib/validation/bidValidation";
 import { isTeamBanned } from "@/lib/actions/admin";
+import { getNextAuctionBidAmount } from "@/lib/services/auction/bidMath";
 
 const PlaceBidSchema = z.object({
   playerId: z.string().uuid(),
@@ -77,9 +78,9 @@ export async function placeBidWithValidation(
       }
     }
 
-    const currentBidAmount = auctionState.current_bid_amount || auctionState.current_base_price || 0;
-    const bidIncrement = 25000;
-    const expectedBid = currentBidAmount + bidIncrement;
+    const expectedBid = getNextAuctionBidAmount(auctionState);
+    const nextTimerSeconds = auctionState.subsequent_bid_timer_seconds || 15;
+    const nextTimerEnd = new Date(Date.now() + nextTimerSeconds * 1000).toISOString();
 
     if (validated.bidAmount !== expectedBid) {
       throw new Error(
@@ -120,6 +121,10 @@ export async function placeBidWithValidation(
         current_bidder_team_id: validated.teamId,
         bid_count: (auctionState.bid_count || 0) + 1,
         status: "bidding",
+        timer_end: nextTimerEnd,
+        is_paused: false,
+        paused_at: null,
+        last_bid_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq("id", auctionState.id);
@@ -174,9 +179,7 @@ export async function getTeamBidEligibility(teamId: string, playerId: string) {
   }
 
   const maxBid = await calculateMaxBid(teamId, player.category, player.gender);
-  const currentBidAmount = auctionState.current_bid_amount || auctionState.current_base_price || 0;
-  const bidIncrement = 25000;
-  const nextBid = currentBidAmount + bidIncrement;
+  const nextBid = getNextAuctionBidAmount(auctionState);
 
   const reasons: string[] = [];
   if (nextBid > maxBid) {

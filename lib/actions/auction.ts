@@ -84,17 +84,8 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
       throw new Error("Cannot deploy player: There is already an active auction in progress. Please sell or mark the current player as unsold first.");
     }
 
-    // 3. Get timer settings
-    console.log('Step 3: Fetching timer settings...');
-    const { data: settings, error: settingsError } = await supabase
-      .from("tournament_settings")
-      .select("first_bid_timer_seconds, subsequent_bid_timer_seconds")
-      .single();
-
-    console.log('Settings:', settings);
-    console.log('Settings error:', settingsError);
-
-    const timerSeconds = settings?.first_bid_timer_seconds || 30;
+    // 3. Use auction_state timer settings as source of truth
+    const timerSeconds = auctionState.first_bid_timer_seconds || 30;
     console.log('Timer seconds:', timerSeconds);
 
     // 4. Update auction_state table
@@ -102,6 +93,7 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
     const updateData = {
       current_player_id: validated.playerId,
       current_base_price: player.base_price,
+      current_bid: player.base_price,
       current_bid_amount: player.base_price,
       bid_count: 0,
       status: "waiting_for_first_bid",
@@ -192,7 +184,7 @@ export async function markPlayerUnsold(playerId: string) {
       throw new Error(`Player not found: ${playerError.message}`);
     }
 
-    // 2. Get auction_state
+    // 1. Get auction_state
     const { data: auctionState, error: stateError } = await supabase
       .from("auction_state")
       .select("*")
@@ -430,15 +422,7 @@ export async function reAuctionPlayer(playerId: string) {
   try {
     const validated = DeployPlayerSchema.parse({ playerId });
 
-    // 1. Get timer settings
-    const { data: settings } = await supabase
-      .from("tournament_settings")
-      .select("first_bid_timer_seconds, subsequent_bid_timer_seconds")
-      .single();
-
-    const timerSeconds = settings?.first_bid_timer_seconds || 30;
-
-    // 2. Get auction_state
+    // 1. Get auction_state
     const { data: auctionState, error: stateError } = await supabase
       .from("auction_state")
       .select("*")
@@ -448,11 +432,15 @@ export async function reAuctionPlayer(playerId: string) {
       throw new Error(`Failed to fetch auction state: ${stateError.message}`);
     }
 
-    // 3. Update auction_state - restart auction
+    const timerSeconds = auctionState.first_bid_timer_seconds || 30;
+
+    // 2. Update auction_state - restart auction
     const { error: updateError } = await supabase
       .from("auction_state")
       .update({
         status: "waiting_for_first_bid",
+        current_bid: auctionState.current_base_price || 0,
+        current_bid_amount: auctionState.current_base_price,
         bid_count: 0,
         current_bidder_team_id: null,
         updated_at: new Date().toISOString(),
@@ -463,7 +451,7 @@ export async function reAuctionPlayer(playerId: string) {
       throw new Error(`Failed to restart auction: ${updateError.message}`);
     }
 
-    // 4. Start timer
+    // 3. Start timer
     const { error: timerError } = await supabase.rpc("start_auction_timer", {
       p_initial_seconds: timerSeconds,
     });
@@ -472,7 +460,7 @@ export async function reAuctionPlayer(playerId: string) {
       console.error("Timer start warning:", timerError.message);
     }
 
-    // 5. Revalidate pages
+    // 4. Revalidate pages
     revalidatePath("/admin");
     revalidatePath("/captain");
 

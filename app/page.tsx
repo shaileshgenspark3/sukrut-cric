@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { Shield, Users, Activity, Gavel, Trophy, ArrowRight, Zap, Target, Star, CheckCircle, Monitor } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { getLiveAuctionBidAmount } from '@/lib/services/auction/bidMath';
 
 const fetchSettings = async () => {
   const { data } = await supabase.from('tournament_settings').select('*').single();
@@ -40,6 +41,7 @@ export default function LandingPage() {
   const { data: topPlayers } = useQuery({ queryKey: ['top_players'], queryFn: fetchTopSoldPlayers });
 
   const isLive = settings?.is_auction_live;
+  const liveBidAmount = getLiveAuctionBidAmount(auctionState);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -176,7 +178,7 @@ export default function LandingPage() {
                             <div className="flex justify-between items-center px-2">
                               <div className="text-left">
                                 <p className="text-[10px] text-slate-400 font-black tracking-widest uppercase mb-1">Current Active Bid</p>
-                                <p className="text-4xl font-display font-black text-white leading-none">₹{auctionState.current_bid.toLocaleString()}</p>
+                                <p className="text-4xl font-display font-black text-white leading-none">₹{liveBidAmount.toLocaleString()}</p>
                               </div>
                               {auctionState.current_bidder && (
                                 <motion.div

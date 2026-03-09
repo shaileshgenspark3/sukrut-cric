@@ -20,6 +20,7 @@ import { useBids } from '@/hooks/useBids';
 import { BidHistory } from '@/components/admin/BidHistory';
 import { getTeamEligibility, checkCategoryEligibility } from '@/lib/validation/bidValidation';
 import { placeBidWithValidation } from '@/lib/actions/bids';
+import { getLiveAuctionBidAmount, getNextAuctionBidAmount } from '@/lib/services/auction/bidMath';
 
 type SponsorTriggerStatus = 'sold' | 'unsold';
 
@@ -155,9 +156,8 @@ export default function CaptainDashboard() {
     const effectivePurse = basePurse - captainDeduction;
     const availableTokens = effectivePurse - totalSpent;
 
-    const currentBid = auctionState?.current_bid || 0;
-    const increment = auctionState?.bid_increment || 100;
-    const nextBid = currentBid + increment;
+    const currentBid = getLiveAuctionBidAmount(auctionState);
+    const nextBid = getNextAuctionBidAmount(auctionState);
     const soldPlayerCount = soldPlayerCountFallback;
 
     const isAuctionLive = settings?.is_auction_live;
@@ -182,6 +182,7 @@ export default function CaptainDashboard() {
     const [pauseSponsorDismissedForPlayerId, setPauseSponsorDismissedForPlayerId] = useState<string | null>(null);
     const [dismissedSponsorTriggerKey, setDismissedSponsorTriggerKey] = useState<string | null>(null);
     const [sponsorPopoutNow, setSponsorPopoutNow] = useState(() => Date.now());
+    const [bidErrorMessage, setBidErrorMessage] = useState<string | null>(null);
     const isMaxBidNoteDismissed = !!currentPlayerId && maxBidNoteDismissedForPlayerId === currentPlayerId;
     const isPauseSponsorDismissed = !!currentPlayerId && pauseSponsorDismissedForPlayerId === currentPlayerId;
 
@@ -214,7 +215,11 @@ export default function CaptainDashboard() {
         };
 
         fetchMaxBid();
-    }, [team?.id, auctionState?.current_player?.id, auctionState?.current_bid]);
+    }, [team?.id, auctionState?.current_player?.id, auctionState?.current_bid_amount]);
+
+    useEffect(() => {
+        setBidErrorMessage(null);
+    }, [currentPlayerId]);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -289,6 +294,19 @@ export default function CaptainDashboard() {
             if (!result.success) {
                 throw new Error(result.message);
             }
+        },
+        onMutate: () => {
+            setBidErrorMessage(null);
+        },
+        onSuccess: async () => {
+            setBidErrorMessage(null);
+            await queryClient.invalidateQueries({ queryKey: ['auction_state'] });
+            if (currentPlayerId) {
+                await queryClient.invalidateQueries({ queryKey: ['bids', currentPlayerId] });
+            }
+        },
+        onError: (error) => {
+            setBidErrorMessage(error instanceof Error ? error.message : 'Failed to place bid');
         }
     });
 
@@ -610,6 +628,15 @@ export default function CaptainDashboard() {
                                         {!bidDisabledReason && <div className="absolute inset-x-0 bottom-0 h-1 bg-black/20 group-hover/btn:h-full transition-all duration-700 pointer-events-none" />}
                                     </button>
 
+                                    {bidErrorMessage && (
+                                        <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 px-5 py-4 text-center">
+                                            <p className="flex items-center justify-center gap-2 text-sm font-medium text-destructive">
+                                                <AlertCircle className="w-4 h-4" />
+                                                {bidErrorMessage}
+                                            </p>
+                                        </div>
+                                    )}
+
                                     {/* Max Bid Display */}
                                     {isPlayerOnBlock && maxBid > 0 && soldPlayerCount > 85 && (
                                         <div className={`mt-4 p-4 rounded-2xl text-center ${nextBid > maxBid ? 'bg-destructive/10 border border-destructive/30' : 'bg-primary/10 border border-primary/30'}`}>
@@ -823,7 +850,7 @@ export default function CaptainDashboard() {
                                 </div>
                                 <div className="text-left">
                                     <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Acquisition Cost</p>
-                                    <p className="text-2xl font-display font-black text-white">₹{auctionState?.current_bid?.toLocaleString()}</p>
+                                    <p className="text-2xl font-display font-black text-white">₹{currentBid.toLocaleString()}</p>
                                 </div>
                             </div>
                         </motion.div>

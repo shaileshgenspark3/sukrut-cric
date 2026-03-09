@@ -30,6 +30,7 @@ import Papa from 'papaparse';
 import { PlayerCard } from '@/components/admin/PlayerCard';
 import { BidHistory } from '@/components/admin/BidHistory';
 import { useBids } from '@/hooks/useBids';
+import { getLiveAuctionBidAmount, getNextAuctionBidAmount } from '@/lib/services/auction/bidMath';
 
 export default function AdminDashboard() {
     const router = useRouter();
@@ -2315,7 +2316,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const isLive = settings?.is_auction_live;
     const soldPlayersCount = players?.filter((p: any) => p.is_sold).length || 0;
     const showMaxBidVisibility = soldPlayersCount > 85;
-    const nextBidAmount = (auctionState?.current_bid_amount || auctionState?.current_base_price || 0) + 25000;
+    const nextBidAmount = getNextAuctionBidAmount(auctionState);
     const { data: recentBids } = useQuery({ queryKey: ["recent_bids"], queryFn: async () => (await supabase.from("bids").select("*, team:teams(*), player:players(*)").order("created_at", { ascending: false }).limit(20)).data });
 
     useRealtimeSubscription('dashboard_presence', ['dashboard_live_count']);
@@ -2365,7 +2366,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         };
 
         fetchEligibility();
-    }, [auctionState?.current_player?.id, teams, auctionState?.current_bid]);
+    }, [auctionState?.current_player?.id, teams, auctionState?.current_bid_amount]);
 
     const isTeamBanned = (teamId: string) => {
         return bannedTeams.some((ban: any) => ban.teamId === teamId);
@@ -2402,6 +2403,11 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const [showTimerSettings, setShowTimerSettings] = useState(false);
     const [firstBidTimer, setFirstBidTimer] = useState(30);
     const [subsequentBidTimer, setSubsequentBidTimer] = useState(15);
+
+    useEffect(() => {
+        setFirstBidTimer(auctionState?.first_bid_timer_seconds || 30);
+        setSubsequentBidTimer(auctionState?.subsequent_bid_timer_seconds || 15);
+    }, [auctionState?.first_bid_timer_seconds, auctionState?.subsequent_bid_timer_seconds]);
 
     // Expiry modal state - shows when timer expires
     const [showExpiryModal, setShowExpiryModal] = useState(false);
@@ -2928,7 +2934,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                             player={auctionState.current_player}
                                             basePrice={auctionState.current_base_price || 0}
                                             showBidInfo={true}
-                                            currentBid={auctionState.current_bid}
+                                            currentBid={getLiveAuctionBidAmount(auctionState)}
                                             bidCount={auctionState.bid_count || 0}
                                             topBidder={auctionState.current_bidder}
                                         />
@@ -2940,7 +2946,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                             <div>
                                                 <p className="text-slate-500 text-[10px] uppercase tracking-wider">Next Valid Bid</p>
                                                 <p className="text-primary font-bold text-lg">
-                                                    ₹{((auctionState.current_bid || auctionState.current_base_price || 0) + 25000).toLocaleString()}
+                                                    ₹{getNextAuctionBidAmount(auctionState).toLocaleString()}
                                                 </p>
                                             </div>
                                             <div className="text-right">
