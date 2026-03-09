@@ -181,6 +181,16 @@ export default function CaptainDashboard() {
     const liveCurrentBidderTeamId = liveTopBid?.team_id ?? auctionState?.current_bidder_team_id ?? null;
     const isHighestBidder = liveCurrentBidderTeamId === team?.id;
     const soldPlayerCount = soldPlayerCountFallback;
+    const isAwaitingAdminDecision =
+        !!auctionState?.current_player &&
+        !!auctionState?.timer_end &&
+        totalSeconds === 0 &&
+        (
+            auctionState?.status === 'bidding' ||
+            auctionState?.status === 'waiting_for_first_bid' ||
+            auctionState?.is_paused
+        );
+    const didAuctionCloseWithBid = isAwaitingAdminDecision && !!liveCurrentBidderTeamId;
 
     // Max bid calculation for current player
     const [maxBid, setMaxBid] = useState<number | null>(null);
@@ -303,6 +313,7 @@ export default function CaptainDashboard() {
     let bidDisabledReason = '';
     if (!isAuctionLive) bidDisabledReason = 'Auction is paused';
     else if (!isPlayerOnBlock) bidDisabledReason = 'Waiting for player';
+    else if (isAwaitingAdminDecision) bidDisabledReason = 'Bidding closed — awaiting admin decision';
     else if (isHighestBidder) bidDisabledReason = 'You are the highest bidder!';
     else if (isEligibilityLoading) bidDisabledReason = 'Syncing live bid access...';
     else if (!categoryEligibility.eligible) bidDisabledReason = categoryEligibility.reason || 'Category limit reached';
@@ -382,9 +393,17 @@ export default function CaptainDashboard() {
 
                     <div className="flex items-center gap-6">
                         {isAuctionLive && (
-                            <div className="flex bg-destructive/10 border border-destructive/20 text-destructive px-5 py-2 rounded-2xl items-center gap-3 shadow-[0_0_20px_rgba(239,68,68,0.15)]">
-                                <div className="w-2 h-2 rounded-full bg-destructive animate-ping" />
-                                <span className="font-display font-black text-xs tracking-[0.2em]">BROADCAST LIVE</span>
+                            <div className={`flex px-5 py-2 rounded-2xl items-center gap-3 shadow-[0_0_20px_rgba(239,68,68,0.15)] ${
+                                isAwaitingAdminDecision
+                                    ? 'bg-gold/10 border border-gold/20 text-gold'
+                                    : 'bg-destructive/10 border border-destructive/20 text-destructive'
+                            }`}>
+                                <div className={`w-2 h-2 rounded-full ${
+                                    isAwaitingAdminDecision ? 'bg-gold' : 'bg-destructive animate-ping'
+                                }`} />
+                                <span className="font-display font-black text-xs tracking-[0.2em]">
+                                    {isAwaitingAdminDecision ? 'AWAITING ADMIN' : 'BROADCAST LIVE'}
+                                </span>
                             </div>
                         )}
                         <button
@@ -563,7 +582,7 @@ export default function CaptainDashboard() {
                                         <div className="h-px w-8 bg-white/5" />
                                     </div>
 
-                                    {settings?.sponsor_image_url && isPaused && isPlayerOnBlock && !isPauseSponsorDismissed && (
+                                    {settings?.sponsor_image_url && isPaused && isPlayerOnBlock && !isAwaitingAdminDecision && !isPauseSponsorDismissed && (
                                         <div className="mt-6 w-full max-w-md bg-slate-950/70 border border-gold/20 rounded-2xl p-4">
                                             <div className="flex items-center justify-between mb-3">
                                                 <p className="text-xs uppercase tracking-[0.3em] font-black text-gold">Sponsor</p>
@@ -591,7 +610,9 @@ export default function CaptainDashboard() {
                                     {/* Timer Display */}
                                     {auctionState?.current_player && (
                                         <div className={`mb-6 p-4 rounded-[2rem] text-center relative overflow-hidden ${
-                                            isPaused 
+                                            isAwaitingAdminDecision
+                                                ? 'bg-gold/10 border-2 border-gold/30'
+                                                : isPaused 
                                                 ? 'bg-slate-900/60 border-2 border-yellow-500/30' 
                                                 : totalSeconds <= 10 
                                                     ? 'bg-destructive/10 border-2 border-destructive/30 animate-pulse' 
@@ -599,7 +620,7 @@ export default function CaptainDashboard() {
                                                         ? 'bg-orange-500/10 border-2 border-orange-500/30'
                                                         : 'bg-slate-900/40 border border-white/5'
                                         }`}>
-                                            {isPaused && (
+                                            {isPaused && !isAwaitingAdminDecision && (
                                                 <div className="absolute inset-0 flex items-center justify-center bg-slate-950/50 z-10">
                                                     <span className="bg-yellow-500 text-black px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest animate-pulse">
                                                         PAUSED
@@ -607,15 +628,49 @@ export default function CaptainDashboard() {
                                                 </div>
                                             )}
                                             <p className="text-xs text-slate-300 uppercase tracking-[0.3em] font-black mb-1">
-                                                {isPaused ? 'Timer Frozen At' : isRunning ? 'Time Remaining' : 'Timer Stopped'}
+                                                {isAwaitingAdminDecision
+                                                    ? 'Bidding Closed'
+                                                    : isPaused
+                                                        ? 'Timer Frozen At'
+                                                        : isRunning
+                                                            ? 'Time Remaining'
+                                                            : 'Timer Stopped'}
                                             </p>
                                             <div className={`font-display font-black tracking-tighter ${
-                                                totalSeconds <= 10 ? 'text-destructive text-5xl' : 
-                                                totalSeconds <= 20 ? 'text-orange-500 text-5xl' : 
-                                                'text-white text-5xl'
+                                                isAwaitingAdminDecision
+                                                    ? 'text-gold text-5xl'
+                                                    : totalSeconds <= 10
+                                                        ? 'text-destructive text-5xl'
+                                                        : totalSeconds <= 20
+                                                            ? 'text-orange-500 text-5xl'
+                                                            : 'text-white text-5xl'
                                             }`}>
                                                 {formatMinutesSeconds(totalSeconds)}
                                             </div>
+                                            {isAwaitingAdminDecision && (
+                                                <p className="mt-2 text-xs font-black uppercase tracking-[0.28em] text-gold">
+                                                    Awaiting Admin Confirmation
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {isAwaitingAdminDecision && (
+                                        <div className={`mb-6 rounded-[2rem] border px-6 py-5 ${
+                                            didAuctionCloseWithBid
+                                                ? 'border-gold/30 bg-gold/10'
+                                                : 'border-orange-400/30 bg-orange-500/10'
+                                        }`}>
+                                            <p className={`text-xs font-black uppercase tracking-[0.32em] ${
+                                                didAuctionCloseWithBid ? 'text-gold' : 'text-orange-300'
+                                            }`}>
+                                                {didAuctionCloseWithBid ? 'Winning Bid Locked' : 'No Bid Locked'}
+                                            </p>
+                                            <p className="mt-2 text-sm text-white leading-relaxed">
+                                                {didAuctionCloseWithBid
+                                                    ? `${liveCurrentBidderName || 'A team'} is leading at ₹${currentBid.toLocaleString()}. Admin is now deciding whether to confirm the sale.`
+                                                    : 'The timer has ended with no winning bid locked. Admin will now decide whether to re-auction or keep the player unsold.'}
+                                            </p>
                                         </div>
                                     )}
 
@@ -681,6 +736,14 @@ export default function CaptainDashboard() {
                                             <p className="flex items-center justify-center gap-2 text-sm font-medium text-destructive">
                                                 <AlertCircle className="w-4 h-4" />
                                                 {bidErrorMessage}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {isAwaitingAdminDecision && (
+                                        <div className="mt-4 rounded-2xl border border-gold/20 bg-gold/10 px-5 py-4 text-center">
+                                            <p className="text-sm font-medium text-gold">
+                                                Bidding is closed. Please wait for the Admin decision before the next action.
                                             </p>
                                         </div>
                                     )}

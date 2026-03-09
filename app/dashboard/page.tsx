@@ -64,15 +64,37 @@ const getOutcomeLabel = (status: "sold" | "unsold" | "manual" | null | undefined
 const getPlayerStatusLabel = (status: "sold" | "unsold" | "pending") =>
   status === "sold" ? "CONFIRMED SALE" : status === "unsold" ? "FINAL UNSOLD" : "PENDING";
 
-const LiveTimerCard = memo(function LiveTimerCard({ isActive }: { isActive: boolean }) {
+const LiveTimerCard = memo(function LiveTimerCard({
+  isActive,
+  auctionStatus,
+  isPaused,
+  hasWinningBid,
+  currentBid,
+  currentBidderName,
+}: {
+  isActive: boolean;
+  auctionStatus?: string | null;
+  isPaused?: boolean | null;
+  hasWinningBid?: boolean;
+  currentBid?: number;
+  currentBidderName?: string | null;
+}) {
   const { totalSeconds } = useTimer();
-  const timerCritical = totalSeconds <= 10 && isActive;
+  const isAwaitingAdminDecision =
+    isActive &&
+    totalSeconds === 0 &&
+    (auctionStatus === "bidding" || auctionStatus === "waiting_for_first_bid" || Boolean(isPaused));
+  const timerCritical = totalSeconds <= 10 && isActive && !isAwaitingAdminDecision;
   const timerWarning = totalSeconds > 10 && totalSeconds <= 20 && isActive;
 
   return (
     <div
       className={`rounded-2xl border p-4 text-center ${
-        timerCritical
+        isAwaitingAdminDecision
+          ? hasWinningBid
+            ? "border-emerald-200 bg-emerald-50"
+            : "border-amber-200 bg-amber-50"
+          : timerCritical
           ? "border-red-200 bg-red-50"
           : timerWarning
           ? "border-amber-200 bg-amber-50"
@@ -80,15 +102,35 @@ const LiveTimerCard = memo(function LiveTimerCard({ isActive }: { isActive: bool
       }`}
     >
       <p className="mb-1 flex items-center justify-center gap-1 text-sm text-slate-500">
-        <Clock3 className="h-4 w-4" /> Live Timer
+        <Clock3 className="h-4 w-4" /> {isAwaitingAdminDecision ? "Bidding Closed" : "Live Timer"}
       </p>
       <p
         className={`text-3xl font-semibold ${
-          timerCritical ? "text-red-700" : timerWarning ? "text-amber-700" : "text-slate-900"
+          isAwaitingAdminDecision
+            ? hasWinningBid
+              ? "text-emerald-700"
+              : "text-amber-700"
+            : timerCritical
+            ? "text-red-700"
+            : timerWarning
+            ? "text-amber-700"
+            : "text-slate-900"
         }`}
       >
         {formatMinutesSeconds(totalSeconds)}
       </p>
+      {isAwaitingAdminDecision && (
+        <div className="mt-2 space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-700">
+            Awaiting Admin Decision
+          </p>
+          <p className="text-sm text-slate-600">
+            {hasWinningBid
+              ? `${currentBidderName || "Highest bidder"} locked at ${formatMoney(currentBid)}`
+              : "No winning bid locked yet. Admin will decide the next action."}
+          </p>
+        </div>
+      )}
     </div>
   );
 });
@@ -693,8 +735,19 @@ export default function LiveAuctionDashboard() {
   );
   const sponsorImageUrl =
     typeof settings?.sponsor_image_url === "string" ? settings.sponsor_image_url.trim() : "";
+  const isAwaitingAdminDecisionOnDashboard =
+    !!auctionState?.current_player &&
+    !!auctionState?.timer_end &&
+    new Date(auctionState.timer_end).getTime() <= Date.now() &&
+    (auctionState?.status === "bidding" || auctionState?.status === "waiting_for_first_bid" || Boolean(auctionState?.is_paused));
   const shouldRenderPausedSponsor =
-    (!settings?.is_auction_live || Boolean(auctionState?.is_paused)) && !!sponsorImageUrl;
+    (!settings?.is_auction_live || (Boolean(auctionState?.is_paused) && !isAwaitingAdminDecisionOnDashboard)) && !!sponsorImageUrl;
+  const hasWinningBidSignal =
+    topBids.length > 0 ||
+    !!auctionState?.current_bidder_team_id ||
+    !!currentBidderName ||
+    (auctionState?.bid_count || 0) > 0 ||
+    currentBid > (auctionState?.current_player?.base_price || auctionState?.current_base_price || 0);
 
   const latestLogByPlayer = useMemo(() => {
     const latestByPlayer = new Map<string, any>();
@@ -976,7 +1029,14 @@ export default function LiveAuctionDashboard() {
                   </div>
                 </div>
 
-                <LiveTimerCard isActive={Boolean(auctionState?.current_player)} />
+                <LiveTimerCard
+                  isActive={Boolean(auctionState?.current_player)}
+                  auctionStatus={auctionState?.status}
+                  isPaused={auctionState?.is_paused}
+                  hasWinningBid={hasWinningBidSignal}
+                  currentBid={currentBid}
+                  currentBidderName={currentBidderName}
+                />
 
                 <div>
                   <p className="mb-2 text-sm font-semibold text-slate-700">Top 3 Live Bids</p>

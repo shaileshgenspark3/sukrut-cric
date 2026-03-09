@@ -2732,6 +2732,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const [modifyBidAmount, setModifyBidAmount] = useState<number>(0);
     const [modifyTeamId, setModifyTeamId] = useState<string>('');
     const [liveActionState, setLiveActionState] = useState<null | 'confirm_sale' | 're_auction' | 'keep_for_later'>(null);
+    const expiryFreezeRequestedPlayerRef = useRef<string | null>(null);
 
     // Track previous status for detecting transitions
     const [previousStatus, setPreviousStatus] = useState<string>('');
@@ -2809,7 +2810,6 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const openExpiryDecisionModal = useCallback(
         (playerId: string) => {
             setExpiryModalType(hasLiveBidSignal ? 'has_bids' : 'no_bids');
-            setShowExpiryModal(true);
             setExpiryHandledPlayerId(playerId);
         },
         [hasLiveBidSignal]
@@ -2855,10 +2855,41 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     }, [auctionState?.current_player_id, expiryHandledPlayerId, hasLiveBidSignal, showExpiryModal]);
 
     useEffect(() => {
+        const playerId = auctionState?.current_player_id;
+        if (!playerId) {
+            expiryFreezeRequestedPlayerRef.current = null;
+            return;
+        }
+
+        if (!isAwaitingExpiryDecision || auctionState?.is_paused || expiryFreezeRequestedPlayerRef.current === playerId) {
+            return;
+        }
+
+        expiryFreezeRequestedPlayerRef.current = playerId;
+
+        const freezeAuctionOnExpiry = async () => {
+            try {
+                await pauseTimer();
+                await Promise.all([
+                    queryClient.invalidateQueries({ queryKey: ["auction_state"] }),
+                    queryClient.invalidateQueries({ queryKey: ["auction_state", "timer"] }),
+                    queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] }),
+                ]);
+            } catch (error: any) {
+                console.error("Failed to freeze auction after timer expiry:", error);
+                expiryFreezeRequestedPlayerRef.current = null;
+            }
+        };
+
+        void freezeAuctionOnExpiry();
+    }, [auctionState?.current_player_id, auctionState?.is_paused, isAwaitingExpiryDecision, queryClient]);
+
+    useEffect(() => {
         if (!auctionState?.current_player_id || auctionState?.status === 'idle') {
             setShowExpiryModal(false);
             setShowModifyBid(false);
             setResolvingExpiryAction(false);
+            expiryFreezeRequestedPlayerRef.current = null;
         }
     }, [auctionState?.current_player_id, auctionState?.status]);
 
@@ -3193,7 +3224,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                 </button>
                                 
                                 {/* Pause/Resume Button */}
-                                {auctionState?.current_player && (
+                                {auctionState?.current_player && !isAwaitingExpiryDecision && (
                                     <button
                                         onClick={() => isPaused ? resume() : pause()}
                                         className={`flex items-center gap-2 px-4 py-2 rounded-xl font-display font-black text-xs uppercase tracking-widest transition-all ${
@@ -3215,13 +3246,15 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                         {/* Timer Countdown Display */}
                         {auctionState?.current_player && (
                             <div className={`mb-8 p-6 rounded-[2rem] text-center relative overflow-hidden ${
-                                isPaused 
+                                isAwaitingExpiryDecision
+                                    ? 'bg-green-500/10 border-2 border-green-500/30'
+                                    : isPaused 
                                     ? 'bg-slate-900/60 border-2 border-yellow-500/30' 
                                     : totalSeconds <= 10 
                                         ? 'bg-destructive/10 border-2 border-destructive/30 animate-pulse' 
                                         : 'bg-slate-900/40 border border-white/5'
                             }`}>
-                                {isPaused && (
+                                {isPaused && !isAwaitingExpiryDecision && (
                                     <div className="absolute inset-0 flex items-center justify-center bg-slate-950/50 z-10">
                                         <span className="bg-yellow-500 text-black px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest animate-pulse">
                                             PAUSED
@@ -3229,18 +3262,26 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                     </div>
                                 )}
                                 <p className="text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black mb-2">
-                                    {isPaused ? 'Timer Frozen At' : 'Time Remaining'}
+                                    {isAwaitingExpiryDecision ? 'Decision Window' : isPaused ? 'Timer Frozen At' : 'Time Remaining'}
                                 </p>
                                 <div className={`font-display font-black tracking-tighter ${
-                                    totalSeconds <= 10 ? 'text-destructive text-7xl' : 'text-white text-7xl'
+                                    isAwaitingExpiryDecision
+                                        ? 'text-green-300 text-7xl'
+                                        : totalSeconds <= 10
+                                            ? 'text-destructive text-7xl'
+                                            : 'text-white text-7xl'
                                 }`}>
                                     {formatMinutesSeconds(totalSeconds)}
                                 </div>
-                                {totalSeconds === 0 && (
+                                {isAwaitingExpiryDecision ? (
+                                    <p className="text-green-300 font-black text-sm uppercase tracking-widest mt-2">
+                                        Bidding Frozen • Awaiting Admin Decision
+                                    </p>
+                                ) : totalSeconds === 0 ? (
                                     <p className="text-destructive font-black text-sm uppercase tracking-widest mt-2">
                                         Timer Expired!
                                     </p>
-                                )}
+                                ) : null}
                             </div>
                         )}
 
@@ -3256,11 +3297,23 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                     {/* Auction Status Banner */}
                                     <div className="mb-6 flex items-center justify-between">
                                         <div className="flex items-center gap-3">
-                                            <span className={`w-3 h-3 rounded-full ${auctionState.status === 'bidding' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
+                                            <span className={`w-3 h-3 rounded-full ${
+                                                isAwaitingExpiryDecision
+                                                    ? 'bg-green-400'
+                                                    : auctionState.status === 'bidding'
+                                                        ? 'bg-green-500 animate-pulse'
+                                                        : 'bg-yellow-500'
+                                            }`} />
                                             <span className="text-white font-bold text-sm uppercase tracking-wider">
-                                                {auctionState.status === 'waiting_for_first_bid' ? 'Waiting for First Bid' : 
-                                                 auctionState.status === 'bidding' ? 'Bidding in Progress' : 
-                                                 auctionState.status === 'idle' ? 'Idle' : auctionState.status}
+                                                {isAwaitingExpiryDecision
+                                                    ? 'Awaiting Admin Decision'
+                                                    : auctionState.status === 'waiting_for_first_bid'
+                                                        ? 'Waiting for First Bid'
+                                                        : auctionState.status === 'bidding'
+                                                            ? 'Bidding in Progress'
+                                                            : auctionState.status === 'idle'
+                                                                ? 'Idle'
+                                                                : auctionState.status}
                                             </span>
                                         </div>
                                         <div className="text-right">
@@ -3318,60 +3371,74 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                         </div>
                                     )}
 
-                                    {/* Live Action Dock */}
-                                    <div className="grid grid-cols-1 gap-4 mt-auto lg:grid-cols-3">
-                                        <button
-                                            onClick={markSold}
-                                            disabled={!canConfirmCurrentSale || liveActionState !== null}
-                                            className="group bg-green-500 hover:bg-green-400 text-black font-display font-black py-6 rounded-2xl disabled:opacity-30 transition-all flex items-center justify-center gap-3 text-xl tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-95 uppercase"
-                                        >
-                                            {liveActionState === 'confirm_sale' ? (
-                                                <Loader2 className="w-6 h-6 animate-spin" />
-                                            ) : (
-                                                <CheckCircle className="w-6 h-6 group-hover:scale-125 transition-transform" />
-                                            )}
-                                            {liveActionState === 'confirm_sale'
-                                                ? 'Confirming...'
-                                                : isAwaitingExpiryDecision
-                                                    ? 'Confirm Sale Now'
-                                                    : 'Confirm Sale'}
-                                        </button>
-                                        <button
-                                            onClick={handleLiveReauction}
-                                            disabled={liveActionState !== null}
-                                            className="group bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase disabled:opacity-30"
-                                        >
-                                            {liveActionState === 're_auction' ? (
-                                                <Loader2 className="w-6 h-6 animate-spin" />
-                                            ) : (
-                                                <Gavel className="w-6 h-6 group-hover:rotate-12 transition-transform" />
-                                            )}
-                                            {liveActionState === 're_auction' ? 'Restarting...' : 'Re-Auction'}
-                                        </button>
-                                        <button
-                                            onClick={handleKeepUnsoldForNowDetailed}
-                                            disabled={liveActionState !== null}
-                                            className="group bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 border border-amber-500/20 hover:border-amber-400/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase disabled:opacity-30"
-                                        >
-                                            {liveActionState === 'keep_for_later' ? (
-                                                <Loader2 className="w-6 h-6 animate-spin" />
-                                            ) : (
-                                                <RotateCcw className="w-6 h-6 group-hover:-rotate-180 transition-transform duration-500" />
-                                            )}
-                                            {liveActionState === 'keep_for_later' ? 'Holding...' : 'Keep for Later'}
-                                        </button>
-                                    </div>
-                                    <div className="grid grid-cols-1 gap-4 mt-3 lg:grid-cols-3">
-                                        <p className="text-[10px] text-slate-500 uppercase tracking-[0.24em] leading-relaxed">
-                                            Confirms the player for the current highest bidder and closes the auction.
-                                        </p>
-                                        <p className="text-[10px] text-primary/80 uppercase tracking-[0.24em] leading-relaxed">
-                                            Restarts this player immediately from the base price with a fresh live timer.
-                                        </p>
-                                        <p className="text-[10px] text-amber-200/80 uppercase tracking-[0.24em] leading-relaxed">
-                                            Removes the player from the live block without a final result so you can auction again later.
-                                        </p>
-                                    </div>
+                                    {/* Expiry Decision Actions */}
+                                    {isAwaitingExpiryDecision ? (
+                                        hasLiveBidSignal ? (
+                                            <div className="mt-auto space-y-3">
+                                                <button
+                                                    onClick={handleExpiryConfirmSale}
+                                                    disabled={!canConfirmCurrentSale || resolvingExpiryAction}
+                                                    className="group w-full bg-green-500 hover:bg-green-400 text-black font-display font-black py-6 rounded-2xl disabled:opacity-30 transition-all flex items-center justify-center gap-3 text-xl tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-95 uppercase"
+                                                >
+                                                    {resolvingExpiryAction ? (
+                                                        <Loader2 className="w-6 h-6 animate-spin" />
+                                                    ) : (
+                                                        <CheckCircle className="w-6 h-6 group-hover:scale-125 transition-transform" />
+                                                    )}
+                                                    {resolvingExpiryAction ? 'Confirming...' : 'Confirm Sale'}
+                                                </button>
+                                                <p className="text-[10px] text-green-200/80 uppercase tracking-[0.24em] leading-relaxed">
+                                                    Winning bid is locked. Confirm the sale to close this player immediately.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="grid grid-cols-1 gap-4 mt-auto lg:grid-cols-2">
+                                                    <button
+                                                        onClick={handleExpiryReauction}
+                                                        disabled={resolvingExpiryAction}
+                                                        className="group bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase disabled:opacity-30"
+                                                    >
+                                                        {resolvingExpiryAction ? (
+                                                            <Loader2 className="w-6 h-6 animate-spin" />
+                                                        ) : (
+                                                            <Gavel className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+                                                        )}
+                                                        {resolvingExpiryAction ? 'Working...' : 'Re-Auction'}
+                                                    </button>
+                                                    <button
+                                                        onClick={handleExpiryKeepUnsoldForNow}
+                                                        disabled={resolvingExpiryAction}
+                                                        className="group bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 border border-amber-500/20 hover:border-amber-400/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase disabled:opacity-30"
+                                                    >
+                                                        {resolvingExpiryAction ? (
+                                                            <Loader2 className="w-6 h-6 animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw className="w-6 h-6 group-hover:-rotate-180 transition-transform duration-500" />
+                                                        )}
+                                                        {resolvingExpiryAction ? 'Working...' : 'Keep Unsold'}
+                                                    </button>
+                                                </div>
+                                                <div className="grid grid-cols-1 gap-4 mt-3 lg:grid-cols-2">
+                                                    <p className="text-[10px] text-primary/80 uppercase tracking-[0.24em] leading-relaxed">
+                                                        No valid bid exists. Restart this player with a fresh timer.
+                                                    </p>
+                                                    <p className="text-[10px] text-amber-200/80 uppercase tracking-[0.24em] leading-relaxed">
+                                                        Remove this player from the live block and decide later.
+                                                    </p>
+                                                </div>
+                                            </>
+                                        )
+                                    ) : (
+                                        <div className="mt-auto rounded-2xl border border-dashed border-white/10 bg-slate-900/40 px-5 py-4">
+                                            <p className="text-[10px] text-slate-500 uppercase tracking-[0.28em] font-black">
+                                                Decision Controls Locked
+                                            </p>
+                                            <p className="mt-2 text-sm text-slate-400">
+                                                Confirm Sale / Re-Auction / Keep Unsold will unlock automatically when the live timer reaches 00:00.
+                                            </p>
+                                        </div>
+                                    )}
                                 </motion.div>
                             ) : (
                                 <div className="flex-1 flex flex-col items-center justify-center text-slate-700 py-20">
