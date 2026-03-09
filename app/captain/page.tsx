@@ -171,7 +171,8 @@ export default function CaptainDashboard() {
 
     // Bids hook for real-time bid display
     const { bids, topBids, historyBids, isLoading: bidsLoading } = useBids(
-        auctionState?.current_player?.id || null
+        auctionState?.current_player?.id || null,
+        auctionState?.auction_round ?? null
     );
 
     // Max bid calculation for current player
@@ -302,7 +303,7 @@ export default function CaptainDashboard() {
             setBidErrorMessage(null);
             await queryClient.invalidateQueries({ queryKey: ['auction_state'] });
             if (currentPlayerId) {
-                await queryClient.invalidateQueries({ queryKey: ['bids', currentPlayerId] });
+                await queryClient.invalidateQueries({ queryKey: ['bids', currentPlayerId, auctionState?.auction_round ?? null] });
             }
         },
         onError: (error) => {

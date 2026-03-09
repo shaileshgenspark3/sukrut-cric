@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { User, Ruler, Hand, Trophy, Calendar, Star, AlertCircle } from "lucide-react";
+import { AUCTION_BID_INCREMENT } from "@/lib/services/auction/bidMath";
 
 interface Player {
   id: string;
@@ -44,8 +45,6 @@ const categoryColors: Record<string, { bg: string; text: string; border: string 
   F: { bg: "bg-purple-500/20", text: "text-purple-400", border: "border-purple-500/30" },
 };
 
-const BID_INCREMENT = 25000;
-
 export function PlayerCard({
   player,
   basePrice,
@@ -56,8 +55,8 @@ export function PlayerCard({
 }: PlayerCardProps) {
   const categoryStyle = categoryColors[player.category] || categoryColors["B"];
 
-  // Calculate next bid amount
-  const nextBidAmount = (currentBid || basePrice) + BID_INCREMENT;
+  const displayedBidAmount = showBidInfo ? currentBid ?? basePrice : basePrice;
+  const nextBidAmount = (currentBid ?? basePrice) + AUCTION_BID_INCREMENT;
 
   return (
     <motion.div
@@ -119,10 +118,10 @@ export function PlayerCard({
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div>
               <p className="text-slate-500 text-[10px] uppercase tracking-[0.3em] font-black mb-1">
-                {showBidInfo && currentBid ? "Current Bid" : "Base Price"}
+                {showBidInfo && currentBid != null ? "Current Bid" : "Base Price"}
               </p>
               <p className="text-4xl md:text-5xl font-display font-black text-white tracking-tighter">
-                ₹{(showBidInfo && currentBid ? currentBid : basePrice).toLocaleString()}
+                ₹{displayedBidAmount.toLocaleString()}
               </p>
             </div>
 
@@ -132,7 +131,7 @@ export function PlayerCard({
                   Bid Increment
                 </p>
                 <p className="text-xl font-display font-bold text-primary">
-                  +₹{BID_INCREMENT.toLocaleString()}
+                  +₹{AUCTION_BID_INCREMENT.toLocaleString()}
                 </p>
               </div>
             )}

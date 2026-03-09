@@ -15,15 +15,24 @@ const PlaceBidSchema = z.object({
 
 const COOLDOWN_SECONDS = 3;
 
-export async function checkCooldown(teamId: string, playerId: string): Promise<{ canBid: boolean; reason?: string }> {
-  const { data: lastBid } = await supabase
+export async function checkCooldown(
+  teamId: string,
+  playerId: string,
+  auctionRound?: number
+): Promise<{ canBid: boolean; reason?: string }> {
+  let query = supabase
     .from("bids")
     .select("created_at")
     .eq("team_id", teamId)
     .eq("player_id", playerId)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+    .limit(1);
+
+  if (typeof auctionRound === "number") {
+    query = query.eq("auction_round", auctionRound);
+  }
+
+  const { data: lastBid } = await query.single();
 
   if (lastBid) {
     const lastBidTime = new Date(lastBid.created_at).getTime();
@@ -56,31 +65,18 @@ export async function placeBidWithValidation(
 
     const { data: auctionState, error: stateError } = await supabase
       .from("auction_state")
-      .select("*")
+      .select("current_player_id, current_bid_amount, current_base_price, auction_round")
       .single();
 
     if (stateError) {
       throw new Error(`Failed to fetch auction state: ${stateError.message}`);
     }
 
-    if (!auctionState.current_player_id) {
-      throw new Error("No player is currently on the auction block");
-    }
-
-    if (auctionState.current_player_id !== validated.playerId) {
+    if (!auctionState.current_player_id || auctionState.current_player_id !== validated.playerId) {
       throw new Error("This player is not currently on the auction block");
     }
 
-    if (auctionState.timer_end && !auctionState.is_paused) {
-      const timerExpired = new Date(auctionState.timer_end).getTime() <= Date.now();
-      if (timerExpired) {
-        throw new Error("Timer expired. Waiting for admin confirmation before continuing.");
-      }
-    }
-
     const expectedBid = getNextAuctionBidAmount(auctionState);
-    const nextTimerSeconds = auctionState.subsequent_bid_timer_seconds || 15;
-    const nextTimerEnd = new Date(Date.now() + nextTimerSeconds * 1000).toISOString();
 
     if (validated.bidAmount !== expectedBid) {
       throw new Error(
@@ -88,7 +84,7 @@ export async function placeBidWithValidation(
       );
     }
 
-    const cooldownCheck = await checkCooldown(validated.teamId, validated.playerId);
+    const cooldownCheck = await checkCooldown(validated.teamId, validated.playerId, auctionState.auction_round || 0);
     if (!cooldownCheck.canBid) {
       throw new Error(cooldownCheck.reason);
     }
@@ -103,34 +99,18 @@ export async function placeBidWithValidation(
       throw new Error(validation.reason);
     }
 
-    const { error: bidError } = await supabase.from("bids").insert({
-      player_id: validated.playerId,
-      team_id: validated.teamId,
-      bid_amount: validated.bidAmount,
+    const { data: bidResponse, error: bidError } = await supabase.rpc("place_live_bid", {
+      p_player_id: validated.playerId,
+      p_team_id: validated.teamId,
+      p_bid_amount: validated.bidAmount,
     });
 
     if (bidError) {
       throw new Error(`Failed to place bid: ${bidError.message}`);
     }
 
-    const { error: updateError } = await supabase
-      .from("auction_state")
-      .update({
-        current_bid: validated.bidAmount,
-        current_bid_amount: validated.bidAmount,
-        current_bidder_team_id: validated.teamId,
-        bid_count: (auctionState.bid_count || 0) + 1,
-        status: "bidding",
-        timer_end: nextTimerEnd,
-        is_paused: false,
-        paused_at: null,
-        last_bid_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", auctionState.id);
-
-    if (updateError) {
-      throw new Error(`Failed to update auction state: ${updateError.message}`);
+    if (!bidResponse?.success) {
+      throw new Error(bidResponse?.message || "Failed to place bid");
     }
 
     revalidatePath("/admin");

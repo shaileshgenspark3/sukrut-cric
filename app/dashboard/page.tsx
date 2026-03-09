@@ -39,6 +39,7 @@ type DashboardCurrentBidder = {
 type DashboardAuctionState = {
   id: string;
   status: string | null;
+  auction_round: number | null;
   current_player_id: string | null;
   current_base_price: number | null;
   current_bid_amount: number | null;
@@ -99,7 +100,7 @@ export default function LiveAuctionDashboard() {
       const { data } = await supabase
         .from("auction_state")
         .select(
-          "id, status, current_player_id, current_base_price, current_bid_amount, current_bid, current_bidder_team_id, bid_count, is_paused, timer_end, current_player:players(id, name, image_url, category, playing_role, base_price), current_bidder:teams(id, team_name, team_logo_url)"
+          "id, status, auction_round, current_player_id, current_base_price, current_bid_amount, current_bid, current_bidder_team_id, bid_count, is_paused, timer_end, current_player:players(id, name, image_url, category, playing_role, base_price), current_bidder:teams(id, team_name, team_logo_url)"
         )
         .single();
 
@@ -108,6 +109,7 @@ export default function LiveAuctionDashboard() {
       const source = data as {
         id: string;
         status: string | null;
+        auction_round: number | null;
         current_player_id: string | null;
         current_base_price: number | null;
         current_bid_amount: number | null;
@@ -218,7 +220,7 @@ export default function LiveAuctionDashboard() {
     auctionState?.current_player?.base_price ||
     0;
 
-  const { topBids } = useBids(currentPlayerId);
+  const { topBids } = useBids(currentPlayerId, auctionState?.auction_round ?? null);
   const { totalSeconds, isPaused } = useTimer();
 
   const playerStatusMap = useMemo(() => {

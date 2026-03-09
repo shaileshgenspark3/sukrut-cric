@@ -91,6 +91,7 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
     // 4. Update auction_state table
     console.log('Step 4: Updating auction state...');
     const updateData = {
+      auction_round: (auctionState.auction_round || 0) + 1,
       current_player_id: validated.playerId,
       current_base_price: player.base_price,
       current_bid: player.base_price,
@@ -357,6 +358,7 @@ export async function finalizeSale(
       .select("id")
       .eq("player_id", validated.playerId)
       .eq("team_id", validated.teamId)
+      .eq("auction_round", auctionState.auction_round || 0)
       .order("bid_amount", { ascending: false })
       .limit(1)
       .single();
@@ -438,6 +440,7 @@ export async function reAuctionPlayer(playerId: string) {
     const { error: updateError } = await supabase
       .from("auction_state")
       .update({
+        auction_round: (auctionState.auction_round || 0) + 1,
         status: "waiting_for_first_bid",
         current_bid: auctionState.current_base_price || 0,
         current_bid_amount: auctionState.current_base_price,

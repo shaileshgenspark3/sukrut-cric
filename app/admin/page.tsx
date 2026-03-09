@@ -2337,7 +2337,10 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     const { totalSeconds, minutes, seconds, isRunning, isPaused, pause, resume, start, isExpired } = useTimer();
 
     // Bids for current player
-    const { bids, topBids, historyBids } = useBids(auctionState?.current_player?.id || null);
+    const { bids, topBids, historyBids } = useBids(
+        auctionState?.current_player?.id || null,
+        auctionState?.auction_round ?? null
+    );
 
     // Import eligibility functions
     const [teamEligibility, setTeamEligibility] = useState<any[]>([]);

@@ -8,6 +8,7 @@ export interface Bid {
   id: string;
   player_id: string;
   team_id: string;
+  auction_round: number;
   team_name: string;
   team_logo_url?: string;
   captain_name?: string;
@@ -27,15 +28,15 @@ interface UseBidsReturn {
 /**
  * Hook for fetching and subscribing to bid history for a player
  */
-export function useBids(playerId: string | null): UseBidsReturn {
+export function useBids(playerId: string | null, auctionRound: number | null = null): UseBidsReturn {
   const queryClient = useQueryClient();
   const [bids, setBids] = useState<Bid[]>([]);
 
   // Fetch initial bids
   const { data, isLoading, error } = useQuery({
-    queryKey: ["bids", playerId],
+    queryKey: ["bids", playerId, auctionRound],
     queryFn: async () => {
-      if (!playerId) return [];
+      if (!playerId || auctionRound == null) return [];
 
       const { data: bidsData, error: bidsError } = await supabase
         .from("bids")
@@ -43,6 +44,7 @@ export function useBids(playerId: string | null): UseBidsReturn {
           id,
           player_id,
           team_id,
+          auction_round,
           bid_amount,
           created_at,
           team:teams(
@@ -53,6 +55,7 @@ export function useBids(playerId: string | null): UseBidsReturn {
           )
         `)
         .eq("player_id", playerId)
+        .eq("auction_round", auctionRound)
         .order("bid_amount", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(50);
@@ -63,6 +66,7 @@ export function useBids(playerId: string | null): UseBidsReturn {
         id: bid.id,
         player_id: bid.player_id,
         team_id: bid.team_id,
+        auction_round: bid.auction_round,
         team_name: bid.team?.team_name || "Unknown Team",
         team_logo_url: bid.team?.team_logo_url,
         captain_name: bid.team?.captain_name,
@@ -71,7 +75,7 @@ export function useBids(playerId: string | null): UseBidsReturn {
         created_at: bid.created_at,
       }));
     },
-    enabled: !!playerId,
+    enabled: !!playerId && auctionRound != null,
   });
 
   // Update local state when data changes
@@ -83,7 +87,7 @@ export function useBids(playerId: string | null): UseBidsReturn {
 
   // Subscribe to real-time bid changes
   useEffect(() => {
-    if (!playerId) return;
+    if (!playerId || auctionRound == null) return;
 
     const channel = supabase
       .channel(`bids:${playerId}`)
@@ -103,6 +107,7 @@ export function useBids(playerId: string | null): UseBidsReturn {
               id,
               player_id,
               team_id,
+              auction_round,
               bid_amount,
               created_at,
               team:teams(
@@ -115,11 +120,12 @@ export function useBids(playerId: string | null): UseBidsReturn {
             .eq("id", payload.new.id)
             .single();
 
-          if (!error && newBid) {
+          if (!error && newBid && newBid.auction_round === auctionRound) {
           const formattedBid: Bid = {
             id: newBid.id,
             player_id: newBid.player_id,
             team_id: newBid.team_id,
+            auction_round: newBid.auction_round,
             team_name: (newBid.team as any)?.team_name || "Unknown Team",
             team_logo_url: (newBid.team as any)?.team_logo_url,
             captain_name: (newBid.team as any)?.captain_name,
@@ -135,7 +141,7 @@ export function useBids(playerId: string | null): UseBidsReturn {
             });
 
             // Invalidate queries to refresh data
-            queryClient.invalidateQueries({ queryKey: ["bids", playerId] });
+            queryClient.invalidateQueries({ queryKey: ["bids", playerId, auctionRound] });
           }
         }
       )
@@ -144,7 +150,7 @@ export function useBids(playerId: string | null): UseBidsReturn {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [playerId, queryClient]);
+  }, [playerId, auctionRound, queryClient]);
 
   // Memoize top 3 and history bids
   const topBids = useMemo(() => bids.slice(0, 3), [bids]);
