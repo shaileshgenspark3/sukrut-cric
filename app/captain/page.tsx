@@ -151,10 +151,10 @@ export default function CaptainDashboard() {
     const maxFemale = settings?.max_female_players || 2;
     const totalSpent = roster?.reduce((acc, p) => acc + (p.sold_price || 0), 0) || 0;
 
-    const basePurse = rules?.starting_purse || 30000;
+    const basePurse = rules?.starting_purse || settings?.global_purse || 3000000;
     const captainDeduction = rules?.captain_deduction || 0;
     const effectivePurse = basePurse - captainDeduction;
-    const availableTokens = effectivePurse - totalSpent;
+    const availableTokens = rules?.current_purse ?? (effectivePurse - totalSpent);
 
     const currentBid = getLiveAuctionBidAmount(auctionState);
     const nextBid = getNextAuctionBidAmount(auctionState);

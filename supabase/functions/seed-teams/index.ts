@@ -87,7 +87,8 @@ serve(async (req) => {
                     await supabaseAdmin.from("auction_rules").insert({
                         team_id: teamData.id,
                         captain_deduction: 0,
-                        starting_purse: 30000
+                        starting_purse: 3000000,
+                        current_purse: 3000000
                     });
                     seededTeamsCount++;
                 }

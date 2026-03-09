@@ -237,8 +237,10 @@ export default function AdminDashboard() {
             <AddCaptainModal
                 show={showAddCaptain}
                 onClose={() => setShowAddCaptain(false)}
+                defaultPurse={settings?.global_purse ?? 3000000}
                 onSuccess={() => {
                     queryClient.invalidateQueries({ queryKey: ['teams'] });
+                    queryClient.invalidateQueries({ queryKey: ['rules'] });
                 }}
             />
 
@@ -288,7 +290,7 @@ export default function AdminDashboard() {
 
 // --- MODALS ---
 
-function AddCaptainModal({ show, onClose, onSuccess }: any) {
+function AddCaptainModal({ show, onClose, onSuccess, defaultPurse }: any) {
     const [formData, setFormData] = useState({
         team_name: '',
         captain_name: '',
@@ -338,7 +340,8 @@ function AddCaptainModal({ show, onClose, onSuccess }: any) {
             await supabase.from('auction_rules').insert({
                 team_id: teamData.id,
                 captain_deduction: 0,
-                starting_purse: 30000
+                starting_purse: defaultPurse,
+                current_purse: defaultPurse
             });
 
             onSuccess();
@@ -1270,7 +1273,8 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                             await supabase.from('auction_rules').insert({
                                 team_id: teamData.id,
                                 captain_deduction: 0,
-                                starting_purse: 30000
+                                starting_purse: settings?.global_purse ?? 3000000,
+                                current_purse: settings?.global_purse ?? 3000000
                             });
                         }
 
@@ -1957,7 +1961,7 @@ function downloadCSV(csvContent: string, filename: string) {
 
 function RulesTab({ rules, settings }: any) {
     const queryClient = useQueryClient();
-    const [globalPurse, setGlobalPurse] = useState(settings?.global_purse?.toString() || "30000");
+    const [globalPurse, setGlobalPurse] = useState(settings?.global_purse?.toString() || "3000000");
 
     // Manual deduction state
     const [deductionTeamId, setDeductionTeamId] = useState("");
@@ -1974,25 +1978,39 @@ function RulesTab({ rules, settings }: any) {
 
     const updateGlobalPurse = async () => {
         try {
+            const nextGlobalPurse = parseInt(globalPurse);
+
             // Update tournament_settings
             const { error: settingsError } = await supabase
                 .from("tournament_settings")
-                .update({ global_purse: parseInt(globalPurse) })
+                .update({ global_purse: nextGlobalPurse })
                 .eq("id", settings.id);
 
             if (settingsError) throw settingsError;
 
-            // Update all teams' starting_purse in auction_rules
-            const { error: rulesError } = await supabase
-                .from("auction_rules")
-                .update({ starting_purse: parseInt(globalPurse) })
-                .not('team_id', 'is', null);
+            const existingRules = Array.isArray(rules) ? rules : [];
+            const ruleUpdates = await Promise.all(
+                existingRules.map((rule: any) => {
+                    const previousStartingPurse = rule.starting_purse ?? nextGlobalPurse;
+                    const purseDelta = nextGlobalPurse - previousStartingPurse;
+                    const nextCurrentPurse = Math.max(0, (rule.current_purse ?? previousStartingPurse) + purseDelta);
 
+                    return supabase
+                        .from("auction_rules")
+                        .update({
+                            starting_purse: nextGlobalPurse,
+                            current_purse: nextCurrentPurse,
+                        })
+                        .eq("id", rule.id);
+                })
+            );
+
+            const rulesError = ruleUpdates.find((result) => result.error)?.error;
             if (rulesError) throw rulesError;
 
             queryClient.invalidateQueries({ queryKey: ["settings"] });
             queryClient.invalidateQueries({ queryKey: ["rules"] });
-            alert(`Global purse updated to ₹${parseInt(globalPurse).toLocaleString()} for all teams`);
+            alert(`Global purse updated to ₹${nextGlobalPurse.toLocaleString()} for all teams`);
         } catch (err: any) {
             alert('Error updating global purse: ' + err.message);
         }
