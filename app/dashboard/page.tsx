@@ -148,8 +148,7 @@ export default function LiveAuctionDashboard() {
     queryFn: async () => {
       const { data } = await supabase
         .from("players")
-        .select("id, name, image_url, category, playing_role, gender, age, handy, is_sold, sold_to_team_id, sold_price, player_number, created_at")
-        .order("player_number", { ascending: true, nullsFirst: false })
+        .select("id, name, image_url, category, playing_role, gender, age, handy, is_sold, sold_to_team_id, sold_price, created_at")
         .order("created_at", { ascending: true });
       return data || [];
     },
@@ -231,9 +230,6 @@ export default function LiveAuctionDashboard() {
   const orderedPlayers = useMemo(
     () =>
       [...players].sort((a, b) => {
-        if (a.player_number && b.player_number) return a.player_number - b.player_number;
-        if (a.player_number) return -1;
-        if (b.player_number) return 1;
         return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       }),
     [players]
