@@ -2635,6 +2635,17 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             }
             : auctionState?.current_bidder;
     const nextBidAmount = liveTopBid ? liveTopBid.bid_amount + 25000 : getNextAuctionBidAmount(auctionState);
+    const hasLiveBidSignal =
+        bids.length > 0 ||
+        !!liveBidderTeamId ||
+        (auctionState?.bid_count || 0) > 0 ||
+        liveBidAmount > (auctionState?.current_base_price || 0);
+    const isLiveAuctionTimerActive =
+        !!auctionState?.current_player_id &&
+        !!auctionState?.timer_end &&
+        (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid');
+    const isAwaitingExpiryDecision = isLiveAuctionTimerActive && totalSeconds === 0;
+    const canConfirmCurrentSale = !!auctionState?.current_player_id && !!liveBidderTeamId;
 
     // Import eligibility functions
     const [teamEligibility, setTeamEligibility] = useState<any[]>([]);
@@ -2795,6 +2806,15 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         []
     );
 
+    const openExpiryDecisionModal = useCallback(
+        (playerId: string) => {
+            setExpiryModalType(hasLiveBidSignal ? 'has_bids' : 'no_bids');
+            setShowExpiryModal(true);
+            setExpiryHandledPlayerId(playerId);
+        },
+        [hasLiveBidSignal]
+    );
+
     // Listen for timer expiry event
     useEffect(() => {
         const handleExpiry = (e: Event) => {
@@ -2803,15 +2823,12 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             if (!auctionState?.timer_end) return;
             if (expiryHandledPlayerId === playerId) return;
 
-            const hasBids = (auctionState?.bid_count || 0) > 0;
-            setExpiryModalType(hasBids ? 'has_bids' : 'no_bids');
-            setShowExpiryModal(true);
-            setExpiryHandledPlayerId(playerId);
+            openExpiryDecisionModal(playerId);
         };
 
         window.addEventListener("timer-expiry", handleExpiry);
         return () => window.removeEventListener("timer-expiry", handleExpiry);
-    }, [auctionState?.bid_count, auctionState?.current_player_id, expiryHandledPlayerId]);
+    }, [auctionState?.current_player_id, auctionState?.timer_end, expiryHandledPlayerId, openExpiryDecisionModal]);
 
     // Timer expiry detection - monitor totalSeconds (without queryClient)
     useEffect(() => {
@@ -2826,12 +2843,16 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid') &&
             expiryHandledPlayerId !== playerId
         ) {
-            const hasBids = (auctionState?.bid_count || 0) > 0;
-            setExpiryModalType(hasBids ? 'has_bids' : 'no_bids');
-            setShowExpiryModal(true);
-            setExpiryHandledPlayerId(playerId);
+            openExpiryDecisionModal(playerId);
         }
-    }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.bid_count, auctionState?.timer_end, expiryHandledPlayerId]);
+    }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.timer_end, expiryHandledPlayerId, openExpiryDecisionModal]);
+
+    useEffect(() => {
+        const playerId = auctionState?.current_player_id;
+        if (!playerId || !showExpiryModal || expiryHandledPlayerId !== playerId) return;
+
+        setExpiryModalType(hasLiveBidSignal ? 'has_bids' : 'no_bids');
+    }, [auctionState?.current_player_id, expiryHandledPlayerId, hasLiveBidSignal, showExpiryModal]);
 
     useEffect(() => {
         if (!auctionState?.current_player_id || auctionState?.status === 'idle') {
@@ -2984,25 +3005,28 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             return;
         }
 
-            try {
-                await finalizeSale(
-                    auctionState.current_player_id,
-                    liveBidderTeamId,
-                    liveBidAmount || auctionState.current_base_price
-                );
-                clearAuctionStateInCache();
-                confetti({
-                    particleCount: 150,
-                    spread: 70,
-                    origin: { y: 0.6 },
-                    colors: ['#FFD700', '#FFFFFF', '#3b82f6']
-                });
-                await invalidateAuctionDerivedData();
-                window.dispatchEvent(new CustomEvent("timer-restart"));
-                setShowExpiryModal(false);
-            } catch (error: any) {
-                alert(error.message || 'Failed to confirm sale');
-            }
+        try {
+            setResolvingExpiryAction(true);
+            await finalizeSale(
+                auctionState.current_player_id,
+                liveBidderTeamId,
+                liveBidAmount || auctionState.current_base_price
+            );
+            clearAuctionStateInCache();
+            confetti({
+                particleCount: 150,
+                spread: 70,
+                origin: { y: 0.6 },
+                colors: ['#FFD700', '#FFFFFF', '#3b82f6']
+            });
+            await invalidateAuctionDerivedData();
+            window.dispatchEvent(new CustomEvent("timer-restart"));
+            setShowExpiryModal(false);
+        } catch (error: any) {
+            alert(error.message || 'Failed to confirm sale');
+        } finally {
+            setResolvingExpiryAction(false);
+        }
     };
 
     const handleExpiryModifyBid = () => {
@@ -3273,11 +3297,32 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                         </div>
                                     </div>
 
+                                    {isAwaitingExpiryDecision && (
+                                        <div className={`mb-6 rounded-2xl border px-5 py-4 ${
+                                            hasLiveBidSignal
+                                                ? 'border-green-500/30 bg-green-500/10'
+                                                : 'border-amber-500/30 bg-amber-500/10'
+                                        }`}>
+                                            <p className={`text-xs font-black uppercase tracking-[0.28em] ${
+                                                hasLiveBidSignal ? 'text-green-300' : 'text-amber-200'
+                                            }`}>
+                                                {hasLiveBidSignal
+                                                    ? 'Timer Expired • Confirm Sale Ready'
+                                                    : 'Timer Expired • Awaiting No-Bid Decision'}
+                                            </p>
+                                            <p className="mt-2 text-sm text-white">
+                                                {hasLiveBidSignal
+                                                    ? `${liveBidder?.team_name || 'Winning team'} is locked at ₹${(liveBidAmount || 0).toLocaleString()}. Confirm, modify, or keep for later.`
+                                                    : 'No valid winning bid was detected yet. Keep for later or re-auction this player.'}
+                                            </p>
+                                        </div>
+                                    )}
+
                                     {/* Live Action Dock */}
                                     <div className="grid grid-cols-1 gap-4 mt-auto lg:grid-cols-3">
                                         <button
                                             onClick={markSold}
-                                            disabled={!liveBidderTeamId || liveActionState !== null}
+                                            disabled={!canConfirmCurrentSale || liveActionState !== null}
                                             className="group bg-green-500 hover:bg-green-400 text-black font-display font-black py-6 rounded-2xl disabled:opacity-30 transition-all flex items-center justify-center gap-3 text-xl tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-95 uppercase"
                                         >
                                             {liveActionState === 'confirm_sale' ? (
@@ -3285,7 +3330,11 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                             ) : (
                                                 <CheckCircle className="w-6 h-6 group-hover:scale-125 transition-transform" />
                                             )}
-                                            {liveActionState === 'confirm_sale' ? 'Confirming...' : 'Confirm Sale'}
+                                            {liveActionState === 'confirm_sale'
+                                                ? 'Confirming...'
+                                                : isAwaitingExpiryDecision
+                                                    ? 'Confirm Sale Now'
+                                                    : 'Confirm Sale'}
                                         </button>
                                         <button
                                             onClick={handleLiveReauction}
@@ -3778,7 +3827,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                         </button>
                                         <button
                                             onClick={handleExpiryConfirmSale}
-                                            disabled={resolvingExpiryAction}
+                                            disabled={resolvingExpiryAction || !canConfirmCurrentSale}
                                             className="py-4 rounded-2xl bg-green-500 text-white hover:bg-green-400 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)]"
                                         >
                                             {resolvingExpiryAction ? 'WORKING...' : 'CONFIRM SALE'}
