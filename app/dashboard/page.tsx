@@ -187,7 +187,7 @@ export default function LiveAuctionDashboard() {
     queryFn: async () => {
       const { data } = await supabase
         .from("players")
-        .select("id, name, sold_price, team:teams(team_name)")
+        .select("id, name, sold_price, team:teams!players_sold_to_team_id_fkey(team_name)")
         .eq("is_sold", true)
         .order("sold_price", { ascending: false })
         .limit(10);

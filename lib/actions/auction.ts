@@ -42,7 +42,7 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
     console.log('Step 1: Fetching player...');
     const { data: player, error: playerError } = await supabase
       .from("players")
-      .select("*, team:teams(*)")
+      .select("*")
       .eq("id", validated.playerId)
       .single();
 
