@@ -27,14 +27,22 @@ const FinalizeSaleSchema = z.object({
  */
 export async function deployPlayer(playerId: string) {
   try {
+    console.log('=== DEPLOY PLAYER START ===');
+    console.log('Player ID:', playerId);
+    
     const validated = DeployPlayerSchema.parse({ playerId });
+    console.log('Validated player ID:', validated.playerId);
 
     // 1. Validate player exists and is eligible (not sold, not captain)
+    console.log('Step 1: Fetching player...');
     const { data: player, error: playerError } = await supabase
       .from("players")
       .select("*, team:teams(*)")
       .eq("id", validated.playerId)
       .single();
+
+    console.log('Player data:', player);
+    console.log('Player error:', playerError);
 
     if (playerError) {
       throw new Error(`Player not found: ${playerError.message}`);
@@ -53,45 +61,63 @@ export async function deployPlayer(playerId: string) {
     }
 
     // 2. Get auction_state to determine current state
+    console.log('Step 2: Fetching auction state...');
     const { data: auctionState, error: stateError } = await supabase
       .from("auction_state")
       .select("*")
       .single();
+
+    console.log('Auction state:', auctionState);
+    console.log('Auction state error:', stateError);
 
     if (stateError) {
       throw new Error(`Failed to fetch auction state: ${stateError.message}`);
     }
 
     // 3. Get timer settings
-    const { data: settings } = await supabase
+    console.log('Step 3: Fetching timer settings...');
+    const { data: settings, error: settingsError } = await supabase
       .from("tournament_settings")
       .select("first_bid_timer_seconds, subsequent_bid_timer_seconds")
       .single();
 
+    console.log('Settings:', settings);
+    console.log('Settings error:', settingsError);
+
     const timerSeconds = settings?.first_bid_timer_seconds || 30;
+    console.log('Timer seconds:', timerSeconds);
 
     // 4. Update auction_state table
+    console.log('Step 4: Updating auction state...');
+    const updateData = {
+      current_player_id: validated.playerId,
+      current_base_price: player.base_price,
+      current_bid_amount: player.base_price,
+      bid_count: 0,
+      status: "waiting_for_first_bid",
+      current_bidder_team_id: null,
+      updated_at: new Date().toISOString(),
+    };
+    console.log('Update data:', updateData);
+    
     const { error: updateError } = await supabase
       .from("auction_state")
-      .update({
-        current_player_id: validated.playerId,
-        current_base_price: player.base_price,
-        current_bid_amount: player.base_price,
-        bid_count: 0,
-        status: "waiting_for_first_bid",
-        current_bidder_team_id: null,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq("id", auctionState.id);
+
+    console.log('Update error:', updateError);
 
     if (updateError) {
       throw new Error(`Failed to deploy player: ${updateError.message}`);
     }
 
     // 5. Start the auction timer via RPC
+    console.log('Step 5: Starting auction timer...');
     const { error: timerError } = await supabase.rpc("start_auction_timer", {
       p_initial_seconds: timerSeconds,
     });
+
+    console.log('Timer RPC error:', timerError);
 
     if (timerError) {
       console.error("Timer start warning:", timerError.message);
@@ -99,15 +125,32 @@ export async function deployPlayer(playerId: string) {
     }
 
     // 6. Revalidate admin and captain pages
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    console.log('Step 6: Revalidating paths...');
+    try {
+      revalidatePath("/admin");
+      console.log('Revalidated /admin');
+      revalidatePath("/captain");
+      console.log('Revalidated /captain');
+    } catch (revalError: any) {
+      console.error('Revalidation error:', revalError);
+      throw new Error(`Revalidation failed: ${revalError.message}`);
+    }
 
+    console.log('=== DEPLOY PLAYER SUCCESS ===');
     return {
       success: true,
       message: `Player ${player.name} deployed to auction`,
       playerId: validated.playerId,
     };
-  } catch (error) {
+  } catch (error: any) {
+    console.error('=== DEPLOY PLAYER ERROR ===');
+    console.error('Error type:', error?.constructor?.name);
+    console.error('Error name:', error?.name);
+    console.error('Error message:', error?.message);
+    console.error('Error stack:', error?.stack);
+    console.error('Full error:', JSON.stringify(error, null, 2));
+    console.error('==============================');
+    
     if (error instanceof z.ZodError) {
       throw new Error(`Validation error: ${error.issues[0].message}`);
     }
