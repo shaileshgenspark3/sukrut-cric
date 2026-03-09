@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { supabase } from "@/lib/supabase";
-import { revalidatePath } from "next/cache";
+import { revalidateAuctionViews } from "@/lib/actions/revalidateAuctionViews";
 
 const CreateLogEntrySchema = z.object({
   playerId: z.string().uuid(),
@@ -85,8 +85,7 @@ export async function createLogEntry(
       throw new Error(`Failed to create log entry: ${logError.message}`);
     }
 
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    revalidateAuctionViews();
 
     return {
       success: true,
@@ -200,8 +199,7 @@ export async function deleteLogEntry(
       throw new Error(`Failed to delete log entry: ${deleteError.message}`);
     }
 
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    revalidateAuctionViews();
 
     return {
       success: true,

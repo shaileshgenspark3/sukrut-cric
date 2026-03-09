@@ -111,8 +111,12 @@ export function ManualSaleModal({ show, onClose }: ManualSaleModalProps) {
       }
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['auction_state'] });
+      queryClient.invalidateQueries({ queryKey: ['players'] });
+      queryClient.invalidateQueries({ queryKey: ['rules'] });
       queryClient.invalidateQueries({ queryKey: ['auction_logs'] });
       queryClient.invalidateQueries({ queryKey: ['available_players'] });
+      queryClient.invalidateQueries({ queryKey: ['recent_bids'] });
       handleClose();
     },
   });

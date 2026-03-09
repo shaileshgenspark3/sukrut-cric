@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRealtimeSubscription } from '@/hooks/useRealtime';
 import {
   FileText, Download, Trash2,
   Filter, Search, ChevronDown, Shield, X,
@@ -53,6 +54,7 @@ interface AuctionLogSourceRow extends Omit<AuctionLog, 'player' | 'team'> {
 interface DeleteConfirmationState {
   show: boolean;
   logId: string | null;
+  status: AuctionLog['status'] | null;
   player: AuctionLog['player'] | null;
   team: AuctionLog['team'] | null;
   reason: string;
@@ -99,6 +101,7 @@ function unwrapRelation<T,>(value: T | T[] | null | undefined): T | null {
 
 export function AuctionLogs() {
   const queryClient = useQueryClient();
+  useRealtimeSubscription('auction_log', ['auction_logs']);
   const [logs, setLogs] = useState<AuctionLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -108,6 +111,7 @@ export function AuctionLogs() {
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmationState>({
     show: false,
     logId: null,
+    status: null,
     player: null,
     team: null,
     reason: '',
@@ -170,16 +174,29 @@ export function AuctionLogs() {
   }, [allLogs, searchTerm, statusFilter]);
 
   const deleteMutation = useMutation({
-    mutationFn: async ({ logId, reason }: { logId: string; reason: string }) => {
-      const { deleteLogEntry } = await import('@/lib/actions/logging');
-      const result = await deleteLogEntry(logId, reason);
+    mutationFn: async ({ logId, reason, status }: { logId: string; reason: string; status: AuctionLog['status'] | null }) => {
+      const result =
+        status === 'unsold'
+          ? await (async () => {
+              const { deleteLogEntry } = await import('@/lib/actions/logging');
+              return deleteLogEntry(logId, reason);
+            })()
+          : await (async () => {
+              const { reverseSale } = await import('@/lib/actions/reverseSale');
+              return reverseSale(logId, reason);
+            })();
+
       if (!result.success) {
         throw new Error(result.message);
       }
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['auction_state'] });
+      queryClient.invalidateQueries({ queryKey: ['players'] });
+      queryClient.invalidateQueries({ queryKey: ['rules'] });
+      queryClient.invalidateQueries({ queryKey: ['recent_bids'] });
       queryClient.invalidateQueries({ queryKey: ['auction_logs'] });
-      setDeleteConfirm({ show: false, logId: null, player: null, team: null, reason: '' });
+      setDeleteConfirm({ show: false, logId: null, status: null, player: null, team: null, reason: '' });
     },
   });
 
@@ -668,6 +685,7 @@ export function AuctionLogs() {
     setDeleteConfirm({
       show: true,
       logId: log.id,
+      status: log.status,
       player: log.player,
       team: log.team,
       reason: '',
@@ -679,6 +697,7 @@ export function AuctionLogs() {
     deleteMutation.mutate({
       logId: deleteConfirm.logId,
       reason: deleteConfirm.reason,
+      status: deleteConfirm.status,
     });
   };
 
@@ -819,7 +838,7 @@ export function AuctionLogs() {
                         <button
                           onClick={() => handleDelete(log)}
                           className="p-2 bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 rounded-lg transition-all"
-                          title="Delete log entry"
+                          title={log.status === 'unsold' ? "Delete unsold entry" : "Reverse sale"}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -858,9 +877,11 @@ export function AuctionLogs() {
               className="glass-card bg-slate-900 border border-white/10 rounded-2xl p-8 max-w-md w-full"
             >
               <div className="flex items-start justify-between mb-6">
-                <h3 className="font-display text-xl font-black text-white tracking-tight uppercase">Delete Log Entry</h3>
+                <h3 className="font-display text-xl font-black text-white tracking-tight uppercase">
+                  {deleteConfirm.status === 'unsold' ? 'Delete Log Entry' : 'Reverse Sale'}
+                </h3>
                 <button
-                  onClick={() => setDeleteConfirm({ show: false, logId: null, player: null, team: null, reason: '' })}
+                  onClick={() => setDeleteConfirm({ show: false, logId: null, status: null, player: null, team: null, reason: '' })}
                   className="text-slate-400 hover:text-white transition-colors"
                 >
                   <X className="w-6 h-6" />
@@ -879,19 +900,25 @@ export function AuctionLogs() {
                   <div className="flex items-start gap-2 text-destructive">
                     <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                     <p className="text-xs leading-relaxed">
-                      This will reverse the sale, restore player to available status, and refund team purse.
+                      {deleteConfirm.status === 'unsold'
+                        ? 'This will remove the unsold log entry from reports and history.'
+                        : 'This will reverse the sale, restore player to available status, and refund team purse.'}
                     </p>
                   </div>
                 </div>
 
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4 mb-2 block">
-                    Reason for deletion
+                    {deleteConfirm.status === 'unsold' ? 'Reason for deletion' : 'Reason for reversal'}
                   </label>
                   <textarea
                     value={deleteConfirm.reason}
                     onChange={(e) => setDeleteConfirm({ ...deleteConfirm, reason: e.target.value })}
-                    placeholder="Enter reason for deleting this log entry..."
+                    placeholder={
+                      deleteConfirm.status === 'unsold'
+                        ? 'Enter reason for deleting this log entry...'
+                        : 'Enter reason for reversing this sale...'
+                    }
                     className="w-full bg-slate-950 border border-white/5 rounded-xl px-4 py-3 text-sm focus:border-primary/50 focus:bg-slate-900 outline-none transition-all placeholder:text-slate-600 resize-none h-24"
                   />
                 </div>
@@ -899,7 +926,7 @@ export function AuctionLogs() {
 
               <div className="flex gap-4">
                 <button
-                  onClick={() => setDeleteConfirm({ show: false, logId: null, player: null, team: null, reason: '' })}
+                  onClick={() => setDeleteConfirm({ show: false, logId: null, status: null, player: null, team: null, reason: '' })}
                   className="flex-1 py-4 rounded-xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest text-sm"
                 >
                   Cancel
@@ -914,7 +941,7 @@ export function AuctionLogs() {
                   ) : (
                     <>
                       <Trash2 className="w-4 h-4" />
-                      Delete Entry
+                      {deleteConfirm.status === 'unsold' ? 'Delete Entry' : 'Reverse Sale'}
                     </>
                   )}
                 </button>

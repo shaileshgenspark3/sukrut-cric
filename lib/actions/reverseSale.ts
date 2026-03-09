@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { supabase } from "@/lib/supabase";
-import { revalidatePath } from "next/cache";
+import { revalidateAuctionViews } from "@/lib/actions/revalidateAuctionViews";
 
 const ReverseSaleSchema = z.object({
   logId: z.string().uuid(),
@@ -110,13 +110,45 @@ export async function reverseSale(
       }
     }
 
-    const { error: bidsError } = await supabase
-      .from("bids")
-      .delete()
-      .eq("player_id", logEntry.player_id);
+    let saleAuctionRound: number | null = null;
 
-    if (bidsError) {
-      console.error("Warning: Failed to clear bids:", bidsError.message);
+    if (logEntry.team_id) {
+      const { data: winningBid } = await supabase
+        .from("bids")
+        .select("auction_round")
+        .eq("player_id", logEntry.player_id)
+        .eq("team_id", logEntry.team_id)
+        .eq("is_winning_bid", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      saleAuctionRound = winningBid?.auction_round ?? null;
+
+      if (saleAuctionRound == null && logEntry.status === "sold") {
+        const { data: latestBidForTeam } = await supabase
+          .from("bids")
+          .select("auction_round")
+          .eq("player_id", logEntry.player_id)
+          .eq("team_id", logEntry.team_id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        saleAuctionRound = latestBidForTeam?.auction_round ?? null;
+      }
+    }
+
+    if (saleAuctionRound != null) {
+      const { error: bidsError } = await supabase
+        .from("bids")
+        .delete()
+        .eq("player_id", logEntry.player_id)
+        .eq("auction_round", saleAuctionRound);
+
+      if (bidsError) {
+        console.error("Warning: Failed to clear bids for reversed round:", bidsError.message);
+      }
     }
 
     const { data: stateData, error: stateError } = await supabase
@@ -154,8 +186,7 @@ export async function reverseSale(
       throw new Error(`Failed to mark log as deleted: ${deleteError.message}`);
     }
 
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    revalidateAuctionViews();
 
     return {
       success: true,

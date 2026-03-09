@@ -2,8 +2,8 @@
 
 import { z } from "zod";
 import { supabase } from "@/lib/supabase";
-import { revalidatePath } from "next/cache";
 import { validateBid, checkCategoryEligibility } from "@/lib/validation/bidValidation";
+import { revalidateAuctionViews } from "@/lib/actions/revalidateAuctionViews";
 
 const CreateManualSaleSchema = z.object({
   playerId: z.string().uuid(),
@@ -185,8 +185,7 @@ export async function createManualSale(
       });
     }
 
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    revalidateAuctionViews();
 
     return {
       success: true,

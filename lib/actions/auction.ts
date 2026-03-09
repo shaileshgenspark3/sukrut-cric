@@ -2,9 +2,9 @@
 
 import { z } from "zod";
 import { supabaseAdmin as supabase } from "@/lib/supabase-admin";
-import { revalidatePath } from "next/cache";
 import { clearBansForPlayer } from "@/lib/actions/admin";
 import { createLogEntry } from "@/lib/actions/logging";
+import { revalidateAuctionViews } from "@/lib/actions/revalidateAuctionViews";
 
 // Zod schemas for validation
 const DeployPlayerSchema = z.object({
@@ -134,10 +134,8 @@ export async function deployPlayer(playerId: string): Promise<{ success: boolean
     // 6. Revalidate admin and captain pages
     console.log('Step 6: Revalidating paths...');
     try {
-      revalidatePath("/admin");
-      console.log('Revalidated /admin');
-      revalidatePath("/captain");
-      console.log('Revalidated /captain');
+      revalidateAuctionViews();
+      console.log('Revalidated auction views');
     } catch (revalError: any) {
       console.error('Revalidation error:', revalError);
       // Don't throw on revalidation error - it's not critical
@@ -238,8 +236,7 @@ export async function markPlayerUnsold(playerId: string) {
      await clearBansForPlayer(validated.playerId);
 
     // 7. Revalidate admin and captain pages
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    revalidateAuctionViews();
 
     return {
       success: true,
@@ -399,8 +396,7 @@ export async function finalizeSale(
     await clearBansForPlayer(validated.playerId);
 
     // 11. Revalidate admin and captain pages
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    revalidateAuctionViews();
 
     return {
       success: true,
@@ -464,8 +460,7 @@ export async function reAuctionPlayer(playerId: string) {
     }
 
     // 4. Revalidate pages
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    revalidateAuctionViews();
 
     return {
       success: true,
@@ -520,8 +515,7 @@ export async function resetAuction() {
     }
 
     // Revalidate pages
-    revalidatePath("/admin");
-    revalidatePath("/captain");
+    revalidateAuctionViews();
 
     console.log('=== AUCTION RESET SUCCESS ===');
     return {

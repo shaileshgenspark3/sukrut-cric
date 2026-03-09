@@ -2469,6 +2469,16 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         window.dispatchEvent(new CustomEvent("timer-restart"));
     }, [queryClient]);
 
+    const invalidateAuctionDerivedData = useCallback(async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["auction_state"] }),
+            queryClient.invalidateQueries({ queryKey: ["players"] }),
+            queryClient.invalidateQueries({ queryKey: ["rules"] }),
+            queryClient.invalidateQueries({ queryKey: ["recent_bids"] }),
+            queryClient.invalidateQueries({ queryKey: ["auction_logs"] }),
+        ]);
+    }, [queryClient]);
+
     // Listen for timer expiry event
     useEffect(() => {
         const handleExpiry = (e: Event) => {
@@ -2618,14 +2628,11 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 setResolvingExpiryAction(true);
                 setShowExpiryModal(false);
                 setExpiryHandledPlayerId(auctionState.current_player_id);
+                await markPlayerUnsold(auctionState.current_player_id);
                 clearAuctionStateInCache();
-                await resetAuction();
-                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
-                await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+                await invalidateAuctionDerivedData();
             } catch (error: any) {
-                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+                await invalidateAuctionDerivedData();
                 setShowExpiryModal(true);
                 alert(error.message || 'Failed to mark player as unsold');
             } finally {
@@ -2642,12 +2649,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 setShowExpiryModal(false);
                 setExpiryHandledPlayerId(auctionState.current_player_id);
                 await reAuctionPlayer(auctionState.current_player_id);
-                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
-                await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+                await invalidateAuctionDerivedData();
             } catch (error: any) {
-                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
+                await invalidateAuctionDerivedData();
                 setShowExpiryModal(true);
                 alert(error.message || 'Failed to re-auction player');
             } finally {
@@ -2668,9 +2672,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         try {
             await resetAuction();
             clearAuctionStateInCache();
-            await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-            await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
-            await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+            await invalidateAuctionDerivedData();
             alert('Auction has been reset. Player removed from auction.');
         } catch (error: any) {
             alert(error.message || 'Failed to reset auction');
@@ -2690,15 +2692,14 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                     auctionState.current_bidder_team_id,
                     auctionState.current_bid_amount || auctionState.current_base_price
                 );
+                clearAuctionStateInCache();
                 confetti({
                     particleCount: 150,
                     spread: 70,
                     origin: { y: 0.6 },
                     colors: ['#FFD700', '#FFFFFF', '#3b82f6']
                 });
-                await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-                await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
-                await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+                await invalidateAuctionDerivedData();
                 window.dispatchEvent(new CustomEvent("timer-restart"));
                 setShowExpiryModal(false);
             } catch (error: any) {
@@ -2722,6 +2723,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             const amount = modifyBidAmount;
             
             await finalizeSale(auctionState.current_player_id, teamId, amount);
+            clearAuctionStateInCache();
+            await invalidateAuctionDerivedData();
             
             // Trigger confetti
             confetti({
@@ -2750,9 +2753,8 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 auctionState.current_bidder_team_id,
                 auctionState.current_bid_amount || auctionState.current_base_price
             );
-            await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-            await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
-            await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+            clearAuctionStateInCache();
+            await invalidateAuctionDerivedData();
             
             // Trigger confetti
             confetti({
@@ -2770,11 +2772,9 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         if (!auctionState?.current_player_id) return;
         
         try {
-            await resetAuction();
+            await markPlayerUnsold(auctionState.current_player_id);
             clearAuctionStateInCache();
-            await queryClient.invalidateQueries({ queryKey: ["auction_state"] });
-            await queryClient.invalidateQueries({ queryKey: ["dashboard", "auction_state"] });
-            await queryClient.invalidateQueries({ queryKey: ["recent_bids"] });
+            await invalidateAuctionDerivedData();
         } catch (err: any) {
             alert(err.message || 'Failed to mark player as unsold');
         }
