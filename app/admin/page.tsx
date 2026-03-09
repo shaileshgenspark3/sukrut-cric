@@ -2524,8 +2524,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
 
         try {
             await deployPlayer(playerToDeploy.id);
-            // Start the timer after successful deployment
-            await startTimer(firstBidTimer);
+            // Timer is already started by deployPlayer via RPC, no need to call startTimer again
             setShowDeployConfirm(false);
             setPlayerToDeploy(null);
         } catch (error: any) {
@@ -2547,12 +2546,17 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     };
 
     const handleExpiryReauction = async () => {
-        // User chose to re-auction - restart timer
-        try {
-            await startTimer(firstBidTimer);
+        // User chose to re-auction - restart timer and reset auction state
+        if (auctionState?.current_player_id) {
+            try {
+                await reAuctionPlayer(auctionState.current_player_id);
+                setShowExpiryModal(false);
+            } catch (error: any) {
+                alert(error.message || 'Failed to re-auction player');
+            }
+        } else {
+            alert('No player currently in auction');
             setShowExpiryModal(false);
-        } catch (error: any) {
-            alert(error.message || 'Failed to re-auction player');
         }
     };
 
