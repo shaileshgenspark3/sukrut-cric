@@ -61,6 +61,10 @@ const imageFallback = (seed: string) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed || "SPL")}`;
 const relationOne = <T,>(value: T | T[] | null | undefined): T | undefined =>
   Array.isArray(value) ? value[0] : value || undefined;
+const getOutcomeLabel = (status: "sold" | "unsold" | "manual" | null | undefined) =>
+  status === "unsold" ? "Final Unsold" : status ? "Confirmed Sale" : null;
+const getPlayerStatusLabel = (status: "sold" | "unsold" | "pending") =>
+  status === "sold" ? "CONFIRMED SALE" : status === "unsold" ? "FINAL UNSOLD" : "PENDING";
 
 const getOrCreateDashboardSessionId = () => {
   if (typeof window === "undefined") return null;
@@ -184,7 +188,7 @@ export default function LiveAuctionDashboard() {
     refetchInterval: 5000,
   });
 
-  const { data: topSoldPlayers = [] } = useQuery<any[]>({
+  const { data: topConfirmedSalePlayers = [] } = useQuery<any[]>({
     queryKey: ["dashboard", "top_sold"],
     queryFn: async () => {
       const { data } = await supabase
@@ -293,7 +297,7 @@ export default function LiveAuctionDashboard() {
   }, [teams, players, rules, settings?.global_purse]);
 
   const tickerCards = recentSales.length ? [...recentSales, ...recentSales] : [];
-  const topTenRows = Array.from({ length: 10 }, (_, idx) => topSoldPlayers[idx] || null);
+  const topTenConfirmedSaleRows = Array.from({ length: 10 }, (_, idx) => topConfirmedSalePlayers[idx] || null);
   const timerCritical = totalSeconds <= 10 && auctionState?.current_player;
   const timerWarning = totalSeconds > 10 && totalSeconds <= 20 && auctionState?.current_player;
   const sponsorImageUrl =
@@ -361,8 +365,7 @@ export default function LiveAuctionDashboard() {
   );
   const activeSponsorPlayer = relationOne<any>(activeSponsorLog?.player);
   const activeSponsorTeam = relationOne<any>(activeSponsorLog?.team);
-  const sponsorStatusLabel =
-    activeSponsorLog?.status === "unsold" ? "UNSOLD" : activeSponsorLog?.status ? "SOLD" : null;
+  const sponsorStatusLabel = getOutcomeLabel(activeSponsorLog?.status);
   const sponsorStatusTone =
     activeSponsorLog?.status === "unsold"
       ? "border-amber-300 bg-amber-50 text-amber-700"
@@ -519,11 +522,11 @@ export default function LiveAuctionDashboard() {
 
           <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div className="rounded-xl bg-emerald-50 px-3 py-2">
-              <p className="text-xs text-emerald-700">Sold</p>
+              <p className="text-xs text-emerald-700">Confirmed Sales</p>
               <p className="text-lg font-semibold">{soldCount}</p>
             </div>
             <div className="rounded-xl bg-amber-50 px-3 py-2">
-              <p className="text-xs text-amber-700">Unsold</p>
+              <p className="text-xs text-amber-700">Final Unsold</p>
               <p className="text-lg font-semibold">{unsoldCount}</p>
             </div>
             <div className="rounded-xl bg-slate-100 px-3 py-2">
@@ -577,7 +580,7 @@ export default function LiveAuctionDashboard() {
                     <p className="text-base font-semibold text-slate-800">{activeSponsorPlayer?.name || "Player"}</p>
                     <p className="text-sm font-semibold text-slate-700">
                       {activeSponsorLog.status === "unsold"
-                        ? "No winning bid registered"
+                        ? "No winning bid registered • Final unsold"
                         : `Final Bid: ${formatMoney(scaled(activeSponsorLog.sale_price || 0))}`}
                     </p>
                     <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
@@ -761,11 +764,11 @@ export default function LiveAuctionDashboard() {
 
               <div className="mb-4 grid grid-cols-3 gap-2 text-center text-sm">
                 <div className="rounded-xl bg-emerald-50 p-2">
-                  <p className="text-xs text-emerald-700">Sold</p>
+                  <p className="text-xs text-emerald-700">Confirmed Sales</p>
                   <p className="font-semibold">{soldCount}</p>
                 </div>
                 <div className="rounded-xl bg-amber-50 p-2">
-                  <p className="text-xs text-amber-700">Unsold</p>
+                  <p className="text-xs text-amber-700">Final Unsold</p>
                   <p className="font-semibold">{unsoldCount}</p>
                 </div>
                 <div className="rounded-xl bg-slate-200 p-2">
@@ -788,7 +791,7 @@ export default function LiveAuctionDashboard() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Completion Percentage</p>
-                  <p className="text-xs text-slate-500">(Sold + Unsold) / Total Players</p>
+                  <p className="text-xs text-slate-500">(Confirmed Sales + Final Unsold) / Total Players</p>
                 </div>
               </div>
             </div>
@@ -876,7 +879,7 @@ export default function LiveAuctionDashboard() {
           <div className="lg:col-span-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
               <Trophy className="h-5 w-5 text-amber-500" />
-              Top 10 Successful Bids
+              Top 10 Confirmed Sales
             </h2>
             <div className="overflow-hidden rounded-2xl border border-slate-200">
               <table className="w-full text-sm">
@@ -885,11 +888,11 @@ export default function LiveAuctionDashboard() {
                     <th className="px-3 py-2">Rank</th>
                     <th>Player Name</th>
                     <th>Team Name</th>
-                    <th className="text-right pr-3">Sold Amount</th>
+                    <th className="text-right pr-3">Sale Amount</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topTenRows.map((player, index) => {
+                  {topTenConfirmedSaleRows.map((player, index) => {
                     if (!player) {
                       return (
                         <tr key={`placeholder-${index}`} className="border-t border-slate-100 text-slate-400">
@@ -1206,7 +1209,7 @@ export default function LiveAuctionDashboard() {
                                     : "bg-slate-100 text-slate-600"
                                 }`}
                               >
-                                {playerStatus === "sold" ? "SOLD" : playerStatus === "unsold" ? "UNSOLD" : "PENDING"}
+                                {getPlayerStatusLabel(playerStatus)}
                               </span>
                             </div>
 
@@ -1216,7 +1219,7 @@ export default function LiveAuctionDashboard() {
                                     resolvedTeam?.captain_name || "Captain"
                                   }`
                                 : playerStatus === "unsold"
-                                ? "No winning bid (unsold)"
+                                ? "No winning bid • Final unsold"
                                 : "Awaiting auction turn"}
                             </p>
                           </div>
@@ -1250,8 +1253,8 @@ export default function LiveAuctionDashboard() {
             </div>
             <div className="max-h-[70vh] overflow-y-auto p-4">
               <div className="mb-3 flex flex-wrap gap-2 text-xs">
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-emerald-700">S = Sold</span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-amber-700">U = Unsold</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-emerald-700">S = Confirmed Sale</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-amber-700">U = Final Unsold</span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-slate-700">Blank = Pending</span>
               </div>
               <div className="grid grid-cols-6 gap-2 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12">

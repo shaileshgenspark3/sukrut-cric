@@ -9,7 +9,7 @@ import { useTimer } from '@/hooks/useTimer';
 import { formatMinutesSeconds, formatHoursMinutesSeconds } from '@/lib/services/timer/timerService';
 import { startTimer, pauseTimer, resumeTimer, updateTimerSettings } from '@/lib/actions/timer';
 import { assignCaptain, removeCaptain } from '@/lib/actions/captains';
-import { deployPlayer, markPlayerUnsold, finalizeSale, reAuctionPlayer, resetAuction } from '@/lib/actions/auction';
+import { deployPlayer, finalizeSale, reAuctionPlayer, resetAuction } from '@/lib/actions/auction';
 import { isPlayerEligibleForAuction } from "@/lib/validation/teamComposition";
 import { manualPurseDeduction, updateBasePrices } from '@/lib/actions/rules';
 import { banTeamFromBidding, unbanTeam, getBannedTeams } from '@/lib/actions/admin';
@@ -1335,8 +1335,8 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-6">
                 <StatCard title="Total Teams" value={teams?.length || 0} icon={Users} color="text-blue-500" accent="bg-blue-500" />
                 <StatCard title="Available Pool" value={totalPlayers} icon={Users} color="text-purple-500" accent="bg-purple-500" />
-                <StatCard title="Successfully Sold" value={soldPlayers} icon={CheckCircle} color="text-green-500" accent="bg-green-500" />
-                <StatCard title="Marked Unsold" value={unsoldPlayers} icon={XCircle} color="text-amber-500" accent="bg-amber-500" />
+                <StatCard title="Confirmed Sales" value={soldPlayers} icon={CheckCircle} color="text-green-500" accent="bg-green-500" />
+                <StatCard title="Final Unsold" value={unsoldPlayers} icon={XCircle} color="text-amber-500" accent="bg-amber-500" />
                 <StatCard title="Still Pending" value={pendingPlayers} icon={Activity} color="text-slate-400" accent="bg-slate-400" />
                 <StatCard title="Completion" value={`${progress.toFixed(0)}%`} icon={Activity} color="text-cyan-500" accent="bg-cyan-500" />
                 <StatCard title="Auction Phase" value={settings?.is_auction_live ? "LIVE" : "IDLE"} icon={Activity} color={settings?.is_auction_live ? "text-destructive" : "text-slate-500"} accent={settings?.is_auction_live ? "bg-destructive" : "bg-slate-500"} isLive={settings?.is_auction_live} />
@@ -1480,7 +1480,7 @@ function AuctionInputsTab({ settings }: any) {
             <div>
                 <h2 className="text-3xl font-display font-black text-white tracking-tight uppercase">Auction Inputs</h2>
                 <p className="text-slate-500 text-xs font-sans uppercase tracking-[0.2em] font-bold mt-1">
-                    Sponsor visibility controls for sold/unsold and pause states
+                    Sponsor visibility controls for confirmed sale, final unsold, and pause states
                 </p>
             </div>
 
@@ -2526,6 +2526,12 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         ]);
     }, [queryClient]);
 
+    const deferCurrentPlayerFromLiveAuction = useCallback(async () => {
+        await resetAuction();
+        clearAuctionStateInCache();
+        await invalidateAuctionDerivedData();
+    }, [clearAuctionStateInCache, invalidateAuctionDerivedData]);
+
     // Listen for timer expiry event
     useEffect(() => {
         const handleExpiry = (e: Event) => {
@@ -2668,20 +2674,18 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
     };
 
     // Handle timer expiry
-    const handleExpiryNoBids = async () => {
-        // User chose to keep unsold
+    const handleExpiryKeepUnsoldForNow = async () => {
+        // User chose to defer the player for a later auction
         if (auctionState?.current_player_id) {
             try {
                 setResolvingExpiryAction(true);
                 setShowExpiryModal(false);
                 setExpiryHandledPlayerId(auctionState.current_player_id);
-                await markPlayerUnsold(auctionState.current_player_id);
-                clearAuctionStateInCache();
-                await invalidateAuctionDerivedData();
+                await deferCurrentPlayerFromLiveAuction();
             } catch (error: any) {
                 await invalidateAuctionDerivedData();
                 setShowExpiryModal(true);
-                alert(error.message || 'Failed to mark player as unsold');
+                alert(error.message || 'Failed to keep player unsold for now');
             } finally {
                 setResolvingExpiryAction(false);
             }
@@ -2710,19 +2714,17 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         }
     };
 
-    // Reset auction - remove player from auction without marking sold/unsold
-    const handleResetAuction = async () => {
-        if (!confirm('Are you sure you want to remove the current player from auction? This will reset the auction state.')) {
+    // Keep player unsold for now - remove from live auction without a final sale result
+    const handleKeepUnsoldForNowQuick = async () => {
+        if (!confirm('Keep the current player unsold for now? This will remove the player from the live auction without recording a sale. You can auction the player again later.')) {
             return;
         }
         
         try {
-            await resetAuction();
-            clearAuctionStateInCache();
-            await invalidateAuctionDerivedData();
-            alert('Auction has been reset. Player removed from auction.');
+            await deferCurrentPlayerFromLiveAuction();
+            alert('Player removed from the live auction and kept unsold for now.');
         } catch (error: any) {
-            alert(error.message || 'Failed to reset auction');
+            alert(error.message || 'Failed to keep player unsold for now');
         }
     };
 
@@ -2750,7 +2752,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 window.dispatchEvent(new CustomEvent("timer-restart"));
                 setShowExpiryModal(false);
             } catch (error: any) {
-                alert(error.message || 'Failed to finalize sale');
+                alert(error.message || 'Failed to confirm sale');
             }
     };
 
@@ -2783,7 +2785,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             
             setShowModifyBid(false);
         } catch (error: any) {
-            alert(error.message || 'Failed to finalize sale');
+            alert(error.message || 'Failed to confirm sale');
         }
     };
 
@@ -2811,19 +2813,30 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                 colors: ['#FFD700', '#FFFFFF', '#3b82f6']
             });
         } catch (err: any) {
-            alert(err.message || 'Failed to mark player as sold');
+            alert(err.message || 'Failed to confirm sale');
         }
     };
 
-    const markUnsold = async () => {
+    const handleKeepUnsoldForNowDetailed = async () => {
         if (!auctionState?.current_player_id) return;
-        
+
+        const currentPlayerName = auctionState?.current_player?.name || 'this player';
+        const currentBidAmount = auctionState?.current_bid_amount || auctionState?.current_base_price;
+        const bidderName = auctionState?.current_bidder?.team_name;
+        const hasActiveBids = !!auctionState?.current_bidder_team_id || (auctionState?.bid_count || 0) > 0;
+
+        const confirmationMessage = hasActiveBids
+            ? `Keep ${currentPlayerName} unsold for now? ${bidderName ? `${bidderName} is currently leading at ₹${currentBidAmount?.toLocaleString()}. ` : ''}This will remove the player from the live auction without recording a sale. You can auction the player again later.`
+            : `Keep ${currentPlayerName} unsold for now? This will remove the player from the live auction and keep the player available to auction later.`;
+
+        if (!window.confirm(confirmationMessage)) {
+            return;
+        }
+
         try {
-            await markPlayerUnsold(auctionState.current_player_id);
-            clearAuctionStateInCache();
-            await invalidateAuctionDerivedData();
+            await deferCurrentPlayerFromLiveAuction();
         } catch (err: any) {
-            alert(err.message || 'Failed to mark player as unsold');
+            alert(err.message || 'Failed to keep player unsold for now');
         }
     };
 
@@ -2857,12 +2870,12 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                         </button>
                         {auctionState?.current_player && (
                             <button
-                                onClick={handleResetAuction}
+                                onClick={handleKeepUnsoldForNowQuick}
                                 className="flex items-center gap-2 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest border border-white/20 text-white bg-white/5 hover:bg-white/10 transition-all"
-                                title="Remove the current player from auction immediately"
+                                title="Remove the current player from the live auction and keep them available for later"
                             >
                                 <RotateCcw className="w-4 h-4" />
-                                Remove Player
+                                Keep Unsold For Now
                             </button>
                         )}
                     </div>
@@ -2909,13 +2922,13 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                     </button>
                                 )}
 
-                                {/* Reset Auction Button */}
+                                {/* Keep Unsold For Now Button */}
                                 {auctionState?.current_player && (
                                     <button
-                                        onClick={handleResetAuction}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500 hover:bg-red-500/20 font-display font-black text-xs uppercase tracking-widest transition-all"
+                                        onClick={handleKeepUnsoldForNowQuick}
+                                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 hover:bg-amber-500/20 font-display font-black text-[10px] uppercase tracking-widest transition-all"
                                     >
-                                        <RotateCcw className="w-4 h-4" /> Reset
+                                        <RotateCcw className="w-4 h-4" /> Keep Unsold For Now
                                     </button>
                                 )}
                             </div>
@@ -3013,14 +3026,22 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                             disabled={!auctionState.current_bidder_team_id}
                                             className="group bg-green-500 hover:bg-green-400 text-black font-display font-black py-6 rounded-2xl disabled:opacity-20 transition-all flex items-center justify-center gap-3 text-xl tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-95 uppercase"
                                         >
-                                            <CheckCircle className="w-6 h-6 group-hover:scale-125 transition-transform" /> SOLD
+                                            <CheckCircle className="w-6 h-6 group-hover:scale-125 transition-transform" /> Confirm Sale
                                         </button>
                                         <button
-                                            onClick={markUnsold}
-                                            className="bg-slate-900 hover:bg-destructive/10 text-slate-500 hover:text-destructive border border-white/5 hover:border-destructive/30 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase"
+                                            onClick={handleKeepUnsoldForNowDetailed}
+                                            className="group bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 border border-amber-500/20 hover:border-amber-400/40 font-display font-black py-6 rounded-2xl transition-all flex items-center justify-center gap-3 text-xl tracking-widest active:scale-95 uppercase"
                                         >
-                                            <XCircle className="w-6 h-6" /> UNSOLD
+                                            <RotateCcw className="w-6 h-6 group-hover:-rotate-180 transition-transform duration-500" /> Keep Unsold For Now
                                         </button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-6 mt-3">
+                                        <p className="text-[10px] text-slate-500 uppercase tracking-[0.24em] leading-relaxed">
+                                            Confirms the player for the current highest bidder and closes the auction.
+                                        </p>
+                                        <p className="text-[10px] text-amber-200/80 uppercase tracking-[0.24em] leading-relaxed">
+                                            Removes the player from the live block without a final result so you can auction again later.
+                                        </p>
                                     </div>
                                 </motion.div>
                             ) : (
@@ -3437,15 +3458,15 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                 <>
                                     <p className="text-slate-400 font-sans mb-6">
                                         No bids received for this player.<br/>
-                                        What would you like to do?
+                                        Keep the player unsold for now or immediately restart the auction.
                                     </p>
                                     <div className="flex gap-4">
                                         <button
-                                            onClick={handleExpiryNoBids}
+                                            onClick={handleExpiryKeepUnsoldForNow}
                                             disabled={resolvingExpiryAction}
-                                            className="flex-1 py-4 rounded-2xl bg-destructive text-white hover:bg-destructive/90 transition-all font-black tracking-widest"
+                                            className="flex-1 py-4 rounded-2xl bg-amber-500/10 text-amber-200 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-400/40 transition-all font-black tracking-widest"
                                         >
-                                            {resolvingExpiryAction ? 'WORKING...' : 'KEEP UNSOLD'}
+                                            {resolvingExpiryAction ? 'WORKING...' : 'KEEP UNSOLD FOR NOW'}
                                         </button>
                                         <button
                                             onClick={handleExpiryReauction}
@@ -3467,18 +3488,29 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                     <p className="text-white font-bold mb-6">
                                         by {auctionState?.current_bidder?.team_name || 'Unknown Team'}
                                     </p>
-                                    <div className="flex gap-4">
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                         <button
-                                            onClick={handleExpiryModifyBid}
-                                            className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                                            onClick={handleExpiryKeepUnsoldForNow}
+                                            disabled={resolvingExpiryAction}
+                                            className="py-4 rounded-2xl bg-amber-500/10 text-amber-200 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-400/40 transition-all font-black tracking-widest"
                                         >
-                                            MODIFY BID
+                                            {resolvingExpiryAction ? 'WORKING...' : 'KEEP UNSOLD FOR NOW'}
                                         </button>
                                         <button
                                             onClick={handleExpiryConfirmSale}
-                                            className="flex-1 py-4 rounded-2xl bg-green-500 text-white hover:bg-green-400 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)]"
+                                            disabled={resolvingExpiryAction}
+                                            className="py-4 rounded-2xl bg-green-500 text-white hover:bg-green-400 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)]"
                                         >
-                                            CONFIRM SALE
+                                            {resolvingExpiryAction ? 'WORKING...' : 'CONFIRM SALE'}
+                                        </button>
+                                    </div>
+                                    <div className="mt-3">
+                                        <button
+                                            onClick={handleExpiryModifyBid}
+                                            disabled={resolvingExpiryAction}
+                                            className="w-full py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
+                                        >
+                                            MODIFY BID
                                         </button>
                                     </div>
                                 </>
@@ -3527,13 +3559,13 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                     onClick={() => setShowModifyBid(false)}
                                     className="flex-1 py-4 rounded-2xl bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-all font-black tracking-widest"
                                 >
-                                    Cancel
+                                    CANCEL
                                 </button>
                                 <button
                                     onClick={confirmModifyBid}
                                     className="flex-1 py-4 rounded-2xl bg-green-500 text-white hover:bg-green-400 transition-all font-black tracking-widest shadow-[0_10px_30px_rgba(34,197,94,0.2)]"
                                 >
-                                    Confirm Sale
+                                    CONFIRM SALE
                                 </button>
                             </div>
                         </div>

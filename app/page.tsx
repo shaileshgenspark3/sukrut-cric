@@ -24,7 +24,7 @@ const fetchRecentBids = async () => {
   return data;
 };
 
-const fetchTopSoldPlayers = async () => {
+const fetchTopConfirmedSalePlayers = async () => {
   const { data } = await supabase.from('players').select('*, sold_to_team:teams!players_sold_to_team_id_fkey(*)').eq('is_sold', true).order('sold_price', { ascending: false }).limit(10);
   return data;
 };
@@ -38,7 +38,7 @@ export default function LandingPage() {
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: fetchSettings });
   const { data: auctionState } = useQuery({ queryKey: ['auction_state'], queryFn: fetchAuctionState });
   const { data: recentBids } = useQuery({ queryKey: ['recent_bids'], queryFn: fetchRecentBids });
-  const { data: topPlayers } = useQuery({ queryKey: ['top_players'], queryFn: fetchTopSoldPlayers });
+  const { data: topConfirmedSalePlayers } = useQuery({ queryKey: ['top_players'], queryFn: fetchTopConfirmedSalePlayers });
 
   const isLive = settings?.is_auction_live;
   const liveBidAmount = getLiveAuctionBidAmount(auctionState);
@@ -251,8 +251,8 @@ export default function LandingPage() {
                   </div>
                 </div>
 
-                {/* Top Sold Ticker */}
-                {topPlayers && topPlayers.length > 0 && (
+                {/* Top Confirmed Sales Ticker */}
+                {topConfirmedSalePlayers && topConfirmedSalePlayers.length > 0 && (
                   <motion.div
                     initial={{ opacity: 0, y: 40 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -260,12 +260,12 @@ export default function LandingPage() {
                   >
                     <div className="flex items-center gap-4 mb-6">
                       <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-gold/20 to-transparent" />
-                      <h3 className="font-display text-xs font-black uppercase tracking-[0.4em] text-gold/60">Elite Sold Directory</h3>
+                      <h3 className="font-display text-xs font-black uppercase tracking-[0.4em] text-gold/60">Elite Confirmed Sales</h3>
                       <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-gold/20 to-transparent" />
                     </div>
 
                     <div className="flex gap-4 overflow-x-auto pb-6 scrollbar-hide snap-x">
-                      {topPlayers.map((p) => (
+                      {topConfirmedSalePlayers.map((p) => (
                         <div key={p.id} className="min-w-[280px] glass-card bg-slate-950/40 p-4 rounded-3xl flex items-center gap-4 border-gold/10 hover:border-gold/30 snap-center shrink-0">
                           <img src={p.image_url!} alt={p.name} className="w-14 h-14 rounded-2xl object-cover border border-white/5 bg-slate-900" />
                           <div className="flex-1">

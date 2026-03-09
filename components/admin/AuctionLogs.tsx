@@ -99,6 +99,19 @@ function unwrapRelation<T,>(value: T | T[] | null | undefined): T | null {
   return value;
 }
 
+function getAuctionStatusLabel(status: AuctionLog['status']) {
+  switch (status) {
+    case 'sold':
+      return 'Confirmed Sale';
+    case 'unsold':
+      return 'Final Unsold';
+    case 'manual':
+      return 'Manual Sale';
+    default:
+      return status;
+  }
+}
+
 export function AuctionLogs() {
   const queryClient = useQueryClient();
   useRealtimeSubscription('auction_log', ['auction_logs']);
@@ -210,8 +223,8 @@ export function AuctionLogs() {
 
       return {
         'Player Name': player?.name || 'N/A',
-        Team: team?.team_name || 'Unsold',
-        Status: log.status,
+        Team: team?.team_name || 'Final Unsold',
+        Status: getAuctionStatusLabel(log.status),
         'Sale Price': log.sale_price ?? 0,
         'Base Price': log.base_price,
         'Bid Count': log.bid_count,
@@ -730,9 +743,9 @@ export function AuctionLogs() {
             className="bg-slate-900/60 border border-white/5 rounded-xl pl-10 pr-8 py-3 text-sm focus:border-primary/50 focus:bg-slate-900 outline-none transition-all appearance-none cursor-pointer"
           >
             <option value="all">All Status</option>
-            <option value="sold">Sold</option>
-            <option value="unsold">Unsold</option>
-            <option value="manual">Manual</option>
+            <option value="sold">Confirmed Sale</option>
+            <option value="unsold">Final Unsold</option>
+            <option value="manual">Manual Sale</option>
           </select>
           <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
         </div>
@@ -780,7 +793,7 @@ export function AuctionLogs() {
                           <p className="font-display text-sm font-black text-white tracking-wider">{log.team?.team_name}</p>
                         </div>
                       ) : (
-                        <span className="text-slate-500 text-sm">Unsold</span>
+                        <span className="text-slate-500 text-sm">Final Unsold</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -789,7 +802,7 @@ export function AuctionLogs() {
                         log.status === 'unsold' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' :
                         'bg-blue-500/10 text-blue-500 border border-blue-500/20'
                       }`}>
-                        {log.status}
+                        {getAuctionStatusLabel(log.status)}
                         {log.is_manual && <Shield className="w-3 h-3" />}
                       </span>
                     </td>
@@ -821,7 +834,7 @@ export function AuctionLogs() {
                         <button
                           onClick={() => handleDelete(log)}
                           className="p-2 bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 rounded-lg transition-all"
-                          title={log.status === 'unsold' ? "Delete unsold entry" : "Reverse sale"}
+                          title={log.status === 'unsold' ? "Delete final unsold entry" : "Reverse sale"}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -861,7 +874,7 @@ export function AuctionLogs() {
             >
               <div className="flex items-start justify-between mb-6">
                 <h3 className="font-display text-xl font-black text-white tracking-tight uppercase">
-                  {deleteConfirm.status === 'unsold' ? 'Delete Log Entry' : 'Reverse Sale'}
+                  {deleteConfirm.status === 'unsold' ? 'Delete Final Unsold Entry' : 'Reverse Sale'}
                 </h3>
                 <button
                   onClick={() => setDeleteConfirm({ show: false, logId: null, status: null, player: null, team: null, reason: '' })}
@@ -877,14 +890,14 @@ export function AuctionLogs() {
                     <img src={deleteConfirm.player?.image_url} alt="" className="w-10 h-10 rounded-xl bg-slate-900 object-cover" />
                     <div>
                       <p className="font-display text-sm font-black text-white">{deleteConfirm.player?.name}</p>
-                      <p className="text-[10px] text-slate-400 uppercase">{deleteConfirm.team?.team_name || 'Unsold'}</p>
+                      <p className="text-[10px] text-slate-400 uppercase">{deleteConfirm.team?.team_name || 'Final Unsold'}</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-2 text-destructive">
                     <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                     <p className="text-xs leading-relaxed">
                       {deleteConfirm.status === 'unsold'
-                        ? 'This will remove the unsold log entry from reports and history.'
+                        ? 'This will remove the final unsold log entry from reports and history.'
                         : 'This will reverse the sale, restore player to available status, and refund team purse.'}
                     </p>
                   </div>
@@ -892,14 +905,14 @@ export function AuctionLogs() {
 
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-4 mb-2 block">
-                    {deleteConfirm.status === 'unsold' ? 'Reason for deletion' : 'Reason for reversal'}
+                    {deleteConfirm.status === 'unsold' ? 'Reason for deleting final unsold entry' : 'Reason for reversal'}
                   </label>
                   <textarea
                     value={deleteConfirm.reason}
                     onChange={(e) => setDeleteConfirm({ ...deleteConfirm, reason: e.target.value })}
                     placeholder={
                       deleteConfirm.status === 'unsold'
-                        ? 'Enter reason for deleting this log entry...'
+                        ? 'Enter reason for deleting this final unsold entry...'
                         : 'Enter reason for reversing this sale...'
                     }
                     className="w-full bg-slate-950 border border-white/5 rounded-xl px-4 py-3 text-sm focus:border-primary/50 focus:bg-slate-900 outline-none transition-all placeholder:text-slate-600 resize-none h-24"
@@ -924,7 +937,7 @@ export function AuctionLogs() {
                   ) : (
                     <>
                       <Trash2 className="w-4 h-4" />
-                      {deleteConfirm.status === 'unsold' ? 'Delete Entry' : 'Reverse Sale'}
+                      {deleteConfirm.status === 'unsold' ? 'Delete Final Unsold' : 'Reverse Sale'}
                     </>
                   )}
                 </button>

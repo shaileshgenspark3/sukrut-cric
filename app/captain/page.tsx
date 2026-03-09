@@ -24,6 +24,9 @@ import { getLiveAuctionBidAmount, getNextAuctionBidAmount } from '@/lib/services
 
 type SponsorTriggerStatus = 'sold' | 'unsold';
 
+const getSponsorTriggerLabel = (status: SponsorTriggerStatus) =>
+    status === 'sold' ? 'Confirmed Sale' : 'Final Unsold';
+
 interface AuctionPlayerSnapshot {
     id: string;
     name: string;
@@ -800,7 +803,7 @@ export default function CaptainDashboard() {
                     >
                         <div className="flex items-center justify-between mb-4">
                             <p className="text-xs uppercase tracking-[0.28em] font-black text-gold">
-                                {sponsorTriggerStatus === 'sold' ? 'Sold Trigger' : 'Unsold Trigger'}
+                                {getSponsorTriggerLabel(sponsorTriggerStatus)}
                             </p>
                             <button
                                 onClick={() => setDismissedSponsorTriggerKey(sponsorTriggerKey)}
