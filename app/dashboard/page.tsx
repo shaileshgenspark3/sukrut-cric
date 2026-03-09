@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Info, Trophy, Clock3, Users, CircleDollarSign, Activity, ArrowLeft, Search, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -14,10 +14,10 @@ const CATEGORIES = ["A+", "A", "B", "F"] as const;
 const STAR_LIMITS: Record<string, number> = { "A+": 1, A: 3, B: 4, F: 1 };
 const DASHBOARD_FONT = "'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif";
 const DASHBOARD_FALLBACK_REFETCH_MS = 15000;
-const SPONSOR_POPOUT_ANIMATION_MS = 5000;
 const HEARTBEAT_INTERVAL_MS = 15000;
 const PRESENCE_STALE_MS = 2 * 60 * 1000;
 const DASHBOARD_SESSION_KEY = "sukrut_dashboard_presence_session_id";
+const ULTRA_STABLE_DASHBOARD = true;
 
 type BrowseMode = "team" | "player";
 
@@ -64,6 +64,399 @@ const getOutcomeLabel = (status: "sold" | "unsold" | "manual" | null | undefined
 const getPlayerStatusLabel = (status: "sold" | "unsold" | "pending") =>
   status === "sold" ? "CONFIRMED SALE" : status === "unsold" ? "FINAL UNSOLD" : "PENDING";
 
+const LiveTimerCard = memo(function LiveTimerCard({ isActive }: { isActive: boolean }) {
+  const { totalSeconds } = useTimer();
+  const timerCritical = totalSeconds <= 10 && isActive;
+  const timerWarning = totalSeconds > 10 && totalSeconds <= 20 && isActive;
+
+  return (
+    <div
+      className={`rounded-2xl border p-4 text-center ${
+        timerCritical
+          ? "border-red-200 bg-red-50"
+          : timerWarning
+          ? "border-amber-200 bg-amber-50"
+          : "border-slate-200 bg-slate-50"
+      }`}
+    >
+      <p className="mb-1 flex items-center justify-center gap-1 text-sm text-slate-500">
+        <Clock3 className="h-4 w-4" /> Live Timer
+      </p>
+      <p
+        className={`text-3xl font-semibold ${
+          timerCritical ? "text-red-700" : timerWarning ? "text-amber-700" : "text-slate-900"
+        }`}
+      >
+        {formatMinutesSeconds(totalSeconds)}
+      </p>
+    </div>
+  );
+});
+
+const DashboardHeader = memo(function DashboardHeader({
+  tournamentName,
+  isAuctionLive,
+  soldCount,
+  unsoldCount,
+  pendingCount,
+  completionPercent,
+  onOpenBrowse,
+}: {
+  tournamentName?: string | null;
+  isAuctionLive?: boolean | null;
+  soldCount: number;
+  unsoldCount: number;
+  pendingCount: number;
+  completionPercent: number;
+  onOpenBrowse: () => void;
+}) {
+  return (
+    <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <Link
+            href="/"
+            className="mb-3 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to home
+          </Link>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Public Live Auction Dashboard</p>
+          <h1 className="text-2xl font-semibold">{tournamentName || "Sukrut Premier League"}</h1>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onOpenBrowse}
+            className="inline-flex items-center gap-2 rounded-full border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 shadow-[0_0_22px_rgba(139,92,246,0.25)] transition hover:bg-violet-100"
+          >
+            Browse Team/Player
+          </button>
+          <div
+            className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium ${
+              isAuctionLive
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-slate-50 text-slate-600"
+            }`}
+          >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                isAuctionLive ? (ULTRA_STABLE_DASHBOARD ? "bg-emerald-500" : "bg-emerald-500 animate-pulse") : "bg-slate-400"
+              }`}
+            />
+            {isAuctionLive ? "Live Auction Running" : "Auction Paused"}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded-xl bg-emerald-50 px-3 py-2">
+          <p className="text-xs text-emerald-700">Confirmed Sales</p>
+          <p className="text-lg font-semibold">{soldCount}</p>
+        </div>
+        <div className="rounded-xl bg-amber-50 px-3 py-2">
+          <p className="text-xs text-amber-700">Final Unsold</p>
+          <p className="text-lg font-semibold">{unsoldCount}</p>
+        </div>
+        <div className="rounded-xl bg-slate-100 px-3 py-2">
+          <p className="text-xs text-slate-600">Pending</p>
+          <p className="text-lg font-semibold">{pendingCount}</p>
+        </div>
+        <div className="rounded-xl bg-blue-50 px-3 py-2">
+          <p className="text-xs text-blue-700">Completion</p>
+          <p className="text-lg font-semibold">{completionPercent.toFixed(0)}%</p>
+        </div>
+      </div>
+    </header>
+  );
+});
+
+const CategorySummarySection = memo(function CategorySummarySection({
+  categoryStats,
+  soldCount,
+  unsoldCount,
+  pendingCount,
+  completionPercent,
+  onOpenGrid,
+}: {
+  categoryStats: Array<any>;
+  soldCount: number;
+  unsoldCount: number;
+  pendingCount: number;
+  completionPercent: number;
+  onOpenGrid: () => void;
+}) {
+  return (
+    <div className="lg:col-span-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+        <Activity className="h-5 w-5 text-indigo-600" />
+        Category Stats & Auction Status
+      </h2>
+
+      <div className="overflow-x-auto rounded-2xl border border-slate-200">
+        <table className="w-full min-w-[420px] text-sm">
+          <thead className="bg-slate-50">
+            <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <th className="py-2">Category</th>
+              <th className="text-right pr-2">Total Bid Amt.</th>
+              <th className="text-right pr-2">Avg. Bid Amt.</th>
+              <th className="text-right pr-2">Bidded Players</th>
+              <th className="text-right pr-2">Highest Bid</th>
+              <th className="text-right pr-2">Lowest Bid</th>
+            </tr>
+          </thead>
+          <tbody>
+            {categoryStats.map((row) => (
+              <tr key={row.category} className="border-b border-slate-100 last:border-0 odd:bg-white even:bg-slate-50/40">
+                <td className="py-2 pl-2 font-semibold">{row.category}</td>
+                <td className="text-right pr-2">{formatMoney(row.total)}</td>
+                <td className="text-right pr-2">{formatMoney(row.average)}</td>
+                <td className="text-right pr-2">{row.count}</td>
+                <td className="text-right pr-2">{formatMoney(row.highest)}</td>
+                <td className="text-right pr-2">{formatMoney(row.lowest)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-semibold">Auction Status Summary</p>
+          <button
+            onClick={onOpenGrid}
+            className="rounded-full border border-slate-300 bg-white p-1 text-slate-600 transition hover:bg-slate-100"
+            aria-label="Open complete player tracking grid"
+          >
+            <Info className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mb-4 grid grid-cols-3 gap-2 text-center text-sm">
+          <div className="rounded-xl bg-emerald-50 p-2">
+            <p className="text-xs text-emerald-700">Confirmed Sales</p>
+            <p className="font-semibold">{soldCount}</p>
+          </div>
+          <div className="rounded-xl bg-amber-50 p-2">
+            <p className="text-xs text-amber-700">Final Unsold</p>
+            <p className="font-semibold">{unsoldCount}</p>
+          </div>
+          <div className="rounded-xl bg-slate-200 p-2">
+            <p className="text-xs text-slate-700">Pending</p>
+            <p className="font-semibold">{pendingCount}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div
+            className="relative h-20 w-20 rounded-full"
+            style={{
+              background: `conic-gradient(#2563eb ${completionPercent}%, #e2e8f0 ${completionPercent}% 100%)`,
+            }}
+          >
+            <div className="absolute inset-2 rounded-full bg-slate-50" />
+            <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
+              {completionPercent.toFixed(0)}%
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Completion Percentage</p>
+            <p className="text-xs text-slate-500">(Confirmed Sales + Final Unsold) / Total Players</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const TeamStandingsSection = memo(function TeamStandingsSection({ standings }: { standings: Array<any> }) {
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+        <CircleDollarSign className="h-5 w-5 text-violet-600" />
+        Team Standings & Purse Status
+      </h2>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1180px] text-sm">
+          <thead className="sticky top-0 bg-slate-50">
+            <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <th className="py-2">Team Name</th>
+              <th>Captain Name</th>
+              <th className="text-right pr-2">Total Purse Given</th>
+              <th className="text-right pr-2">Captain Deduction</th>
+              <th className="text-right pr-2">Purse Available</th>
+              <th className="text-right pr-2">Used</th>
+              <th className="text-right pr-2">Remaining</th>
+              <th>Player Category Tracker</th>
+              <th className="text-right pr-2">Total Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            {standings.map((row) => (
+              <tr key={row.team.id} className="border-b border-slate-100 last:border-0 align-top hover:bg-slate-50/60">
+                <td className="py-3">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <img
+                      src={row.team.team_logo_url || imageFallback(row.team.team_name)}
+                      alt={row.team.team_name}
+                      className="h-7 w-7 rounded-lg border border-slate-200 bg-white object-cover"
+                    />
+                    {row.team.team_name}
+                  </div>
+                </td>
+                <td>
+                  <div className="flex items-center gap-2">
+                    <img
+                      src={row.team.captain_image_url || imageFallback(row.team.captain_name)}
+                      alt={row.team.captain_name}
+                      className="h-7 w-7 rounded-full border border-slate-200 bg-white object-cover"
+                    />
+                    <span>{row.team.captain_name}</span>
+                  </div>
+                </td>
+                <td className="text-right pr-2 font-medium">{formatMoney(row.totalPurse)}</td>
+                <td className="text-right pr-2">{formatMoney(row.captainDeduction)}</td>
+                <td className="text-right pr-2">{formatMoney(row.purseAvailable)}</td>
+                <td className="text-right pr-2">{formatMoney(row.used)}</td>
+                <td className="text-right pr-2 font-semibold text-emerald-700">{formatMoney(row.remaining)}</td>
+                <td>
+                  <div className="space-y-1 py-1">
+                    {CATEGORIES.map((category) => {
+                      const limit = STAR_LIMITS[category];
+                      const count = row.categoryCounts[category] || 0;
+                      return (
+                        <div key={`${row.team.id}-${category}`} className="flex items-center gap-2 text-xs">
+                          <span className="w-5 font-semibold">{category}</span>
+                          <div className="flex gap-1">
+                            {Array.from({ length: limit }).map((_, idx) => (
+                              <span key={idx} className={idx < count ? "text-amber-500" : "text-slate-300"}>
+                                {idx < count ? "★" : "☆"}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </td>
+                <td className="pr-2 text-right font-semibold">{row.playerCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+});
+
+const TopSalesSection = memo(function TopSalesSection({
+  topTenConfirmedSaleRows,
+}: {
+  topTenConfirmedSaleRows: Array<any>;
+}) {
+  return (
+    <div className="lg:col-span-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+        <Trophy className="h-5 w-5 text-amber-500" />
+        Top 10 Confirmed Sales
+      </h2>
+      <div className="overflow-hidden rounded-2xl border border-slate-200">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2">Rank</th>
+              <th>Player Name</th>
+              <th>Team Name</th>
+              <th className="text-right pr-3">Sale Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {topTenConfirmedSaleRows.map((player, index) => {
+              if (!player) {
+                return (
+                  <tr key={`placeholder-${index}`} className="border-t border-slate-100 text-slate-400">
+                    <td className="px-3 py-2 font-semibold">{index + 1}</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td className="pr-3 text-right">-</td>
+                  </tr>
+                );
+              }
+
+              const soldTeam = relationOne<{ team_name?: string }>(player.team);
+              return (
+                <tr key={player.id} className="border-t border-slate-100">
+                  <td className={`px-3 py-2 font-semibold ${index < 3 ? "text-amber-600" : ""}`}>{index + 1}</td>
+                  <td>{player.name}</td>
+                  <td>{soldTeam?.team_name || "-"}</td>
+                  <td className="pr-3 text-right font-semibold text-emerald-700">
+                    {formatMoney(player.sold_price || 0)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+});
+
+const RecentSalesTickerSection = memo(function RecentSalesTickerSection({
+  recentSales,
+  tickerCards,
+  stableMode,
+}: {
+  recentSales: Array<any>;
+  tickerCards: Array<any>;
+  stableMode: boolean;
+}) {
+  return (
+    <div className="lg:col-span-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-4 text-lg font-semibold">Recent Bids Ticker</h2>
+      {recentSales.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">No completed sales yet.</div>
+      ) : (
+        <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 py-3">
+          {!stableMode && (
+            <>
+              <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-slate-50 to-transparent" />
+              <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-slate-50 to-transparent" />
+            </>
+          )}
+          <div className={stableMode ? "flex snap-x gap-3 overflow-x-auto px-3 pb-1" : "sales-ticker-track flex w-max gap-3 px-3"}>
+            {(stableMode ? recentSales : tickerCards).map((sale, idx) => {
+              const salePlayer = relationOne<{ name?: string }>(sale.player);
+              const saleTeam = relationOne<{ team_name?: string }>(sale.team);
+              return (
+                <div
+                  key={`${sale.id}-${idx}`}
+                  className={`rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm whitespace-nowrap ${
+                    stableMode ? "shrink-0 snap-start" : ""
+                  }`}
+                >
+                  <span className="font-semibold">{salePlayer?.name || "Player"}</span>
+                  <span className="mx-2 text-slate-500">•</span>
+                  <span className="text-emerald-700">{formatMoney(sale.sale_price || 0)}</span>
+                  <span className="mx-2 text-slate-500">•</span>
+                  <span className="text-slate-600">{saleTeam?.team_name || "Unknown Team"}</span>
+                  <span className="mx-2 text-slate-300">•</span>
+                  <span className="text-xs text-slate-500">
+                    {sale.logged_at
+                      ? new Date(sale.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                      : "--:--"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 const getOrCreateDashboardSessionId = () => {
   if (typeof window === "undefined") return null;
 
@@ -92,9 +485,7 @@ export default function LiveAuctionDashboard() {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [playerSearch, setPlayerSearch] = useState("");
   const [activeSponsorLogId, setActiveSponsorLogId] = useState<string | null>(null);
-  const [isSponsorPopoutAnimating, setIsSponsorPopoutAnimating] = useState(false);
   const [dashboardOpenedAt] = useState(() => Date.now());
-  const sponsorTimerRef = useRef<number | null>(null);
 
   const { data: auctionState } = useQuery<DashboardAuctionState | null>({
     queryKey: ["dashboard", "auction_state"],
@@ -130,7 +521,6 @@ export default function LiveAuctionDashboard() {
         current_bidder: relationOne(source.current_bidder),
       };
     },
-    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: settings } = useQuery({
@@ -142,7 +532,6 @@ export default function LiveAuctionDashboard() {
         .single();
       return data;
     },
-    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: players = [] } = useQuery<any[]>({
@@ -154,7 +543,6 @@ export default function LiveAuctionDashboard() {
         .order("created_at", { ascending: true });
       return data || [];
     },
-    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: teams = [] } = useQuery<any[]>({
@@ -165,13 +553,11 @@ export default function LiveAuctionDashboard() {
           .from("teams")
           .select("id, team_name, captain_name, captain_image_url, team_logo_url")
       ).data || [],
-    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: rules = [] } = useQuery<any[]>({
     queryKey: ["dashboard", "rules"],
     queryFn: async () => (await supabase.from("auction_rules").select("*")).data || [],
-    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const { data: auctionLogs = [] } = useQuery<any[]>({
@@ -183,7 +569,7 @@ export default function LiveAuctionDashboard() {
       }
       return response.json();
     },
-    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
+    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS * 4,
   });
 
   const { data: topConfirmedSalePlayers = [] } = useQuery<any[]>({
@@ -197,7 +583,6 @@ export default function LiveAuctionDashboard() {
         .limit(10);
       return data || [];
     },
-    refetchInterval: DASHBOARD_FALLBACK_REFETCH_MS,
   });
 
   const recentSales = useMemo(
@@ -210,6 +595,9 @@ export default function LiveAuctionDashboard() {
 
   const currentPlayerId = auctionState?.current_player?.id || auctionState?.current_player_id || null;
   const { topBids } = useBids(currentPlayerId, auctionState?.auction_round ?? null);
+  const hasLivePlayerOnTable =
+    !!currentPlayerId &&
+    (auctionState?.status === "bidding" || auctionState?.status === "waiting_for_first_bid");
   const liveTopBid = topBids[0] || null;
   const currentBid =
     liveTopBid?.bid_amount ||
@@ -219,7 +607,6 @@ export default function LiveAuctionDashboard() {
     auctionState?.current_player?.base_price ||
     0;
   const currentBidderName = liveTopBid?.team_name || auctionState?.current_bidder?.team_name || null;
-  const { totalSeconds, isPaused } = useTimer();
 
   const playerStatusMap = useMemo(() => {
     const latestByPlayer = new Map<string, string>();
@@ -296,13 +683,18 @@ export default function LiveAuctionDashboard() {
     });
   }, [teams, players, rules, settings?.global_purse]);
 
-  const tickerCards = recentSales.length ? [...recentSales, ...recentSales] : [];
-  const topTenConfirmedSaleRows = Array.from({ length: 10 }, (_, idx) => topConfirmedSalePlayers[idx] || null);
-  const timerCritical = totalSeconds <= 10 && auctionState?.current_player;
-  const timerWarning = totalSeconds > 10 && totalSeconds <= 20 && auctionState?.current_player;
+  const tickerCards = useMemo(
+    () => (recentSales.length ? [...recentSales, ...recentSales] : []),
+    [recentSales]
+  );
+  const topTenConfirmedSaleRows = useMemo(
+    () => Array.from({ length: 10 }, (_, idx) => topConfirmedSalePlayers[idx] || null),
+    [topConfirmedSalePlayers]
+  );
   const sponsorImageUrl =
     typeof settings?.sponsor_image_url === "string" ? settings.sponsor_image_url.trim() : "";
-  const shouldRenderPausedSponsor = (!settings?.is_auction_live || isPaused) && !!sponsorImageUrl;
+  const shouldRenderPausedSponsor =
+    (!settings?.is_auction_live || Boolean(auctionState?.is_paused)) && !!sponsorImageUrl;
 
   const latestLogByPlayer = useMemo(() => {
     const latestByPlayer = new Map<string, any>();
@@ -341,6 +733,8 @@ export default function LiveAuctionDashboard() {
   const latestResolvedPlayer = relationOne<any>(latestResolvedOutcome?.player);
   const latestResolvedTeam = relationOne<any>(latestResolvedOutcome?.team);
   const latestResolvedStatusLabel = getOutcomeLabel(latestResolvedOutcome?.status);
+  const openBrowseOverlay = useCallback(() => setShowBrowseOverlay(true), []);
+  const openGridOverlay = useCallback(() => setShowGrid(true), []);
 
   const selectedTeamPlayers = useMemo(() => {
     if (!selectedTeamId) return [];
@@ -391,48 +785,22 @@ export default function LiveAuctionDashboard() {
   }, [teams, selectedTeamId]);
 
   useEffect(() => {
-    const latestLog = auctionLogs[0];
+    if (hasLivePlayerOnTable) return;
+
+    const latestLog = auctionLogs.find((log) => ["sold", "unsold", "manual"].includes(log.status));
     if (!latestLog?.id) return;
-    if (!["sold", "unsold"].includes(latestLog.status)) return;
     const latestLogTime = latestLog.logged_at ? new Date(latestLog.logged_at).getTime() : 0;
     if (latestLogTime > 0 && latestLogTime < dashboardOpenedAt - 2000) return;
     if (latestLog.id === activeSponsorLogId) return;
 
     setActiveSponsorLogId(latestLog.id);
-    setIsSponsorPopoutAnimating(true);
-
-    if (sponsorTimerRef.current) {
-      window.clearTimeout(sponsorTimerRef.current);
-    }
-
-    sponsorTimerRef.current = window.setTimeout(() => {
-      setIsSponsorPopoutAnimating(false);
-      sponsorTimerRef.current = null;
-    }, SPONSOR_POPOUT_ANIMATION_MS);
-  }, [auctionLogs, activeSponsorLogId, dashboardOpenedAt]);
+  }, [auctionLogs, activeSponsorLogId, dashboardOpenedAt, hasLivePlayerOnTable]);
 
   useEffect(() => {
-    const nextPlayerOnTable =
-      !!currentPlayerId &&
-      (auctionState?.status === "bidding" || auctionState?.status === "waiting_for_first_bid");
-
-    if (!activeSponsorLog?.player_id || !nextPlayerOnTable) return;
+    if (!activeSponsorLog?.player_id || !hasLivePlayerOnTable) return;
 
     setActiveSponsorLogId(null);
-    setIsSponsorPopoutAnimating(false);
-    if (sponsorTimerRef.current) {
-      window.clearTimeout(sponsorTimerRef.current);
-      sponsorTimerRef.current = null;
-    }
-  }, [activeSponsorLog, currentPlayerId, auctionState?.status]);
-
-  useEffect(() => {
-    return () => {
-      if (sponsorTimerRef.current) {
-        window.clearTimeout(sponsorTimerRef.current);
-      }
-    };
-  }, []);
+  }, [activeSponsorLog, hasLivePlayerOnTable]);
 
   useEffect(() => {
     const sessionId = getOrCreateDashboardSessionId();
@@ -490,63 +858,15 @@ export default function LiveAuctionDashboard() {
       style={{ fontFamily: DASHBOARD_FONT, colorScheme: "light" }}
     >
       <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 md:py-10 space-y-6">
-        <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <Link
-                href="/"
-                className="mb-3 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Back to home
-              </Link>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Public Live Auction Dashboard</p>
-              <h1 className="text-2xl font-semibold">{settings?.tournament_name || "Sukrut Premier League"}</h1>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowBrowseOverlay(true)}
-                className="inline-flex items-center gap-2 rounded-full border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 shadow-[0_0_22px_rgba(139,92,246,0.25)] transition hover:bg-violet-100"
-              >
-                Browse Team/Player
-              </button>
-              <div
-                className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium ${
-                  settings?.is_auction_live
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-slate-200 bg-slate-50 text-slate-600"
-                }`}
-              >
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    settings?.is_auction_live ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
-                  }`}
-                />
-                {settings?.is_auction_live ? "Live Auction Running" : "Auction Paused"}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <div className="rounded-xl bg-emerald-50 px-3 py-2">
-              <p className="text-xs text-emerald-700">Confirmed Sales</p>
-              <p className="text-lg font-semibold">{soldCount}</p>
-            </div>
-            <div className="rounded-xl bg-amber-50 px-3 py-2">
-              <p className="text-xs text-amber-700">Final Unsold</p>
-              <p className="text-lg font-semibold">{unsoldCount}</p>
-            </div>
-            <div className="rounded-xl bg-slate-100 px-3 py-2">
-              <p className="text-xs text-slate-600">Pending</p>
-              <p className="text-lg font-semibold">{pendingCount}</p>
-            </div>
-            <div className="rounded-xl bg-blue-50 px-3 py-2">
-              <p className="text-xs text-blue-700">Completion</p>
-              <p className="text-lg font-semibold">{completionPercent.toFixed(0)}%</p>
-            </div>
-          </div>
-        </header>
+        <DashboardHeader
+          tournamentName={settings?.tournament_name}
+          isAuctionLive={settings?.is_auction_live}
+          soldCount={soldCount}
+          unsoldCount={unsoldCount}
+          pendingCount={pendingCount}
+          completionPercent={completionPercent}
+          onOpenBrowse={openBrowseOverlay}
+        />
 
         <section className="grid gap-6 lg:grid-cols-12">
           <div className="lg:col-span-7 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -557,11 +877,7 @@ export default function LiveAuctionDashboard() {
 
             {activeSponsorLog && (
               <div
-                className={`mb-4 rounded-2xl border p-4 transition-all duration-500 ${
-                  isSponsorPopoutAnimating
-                    ? "scale-[1.01] shadow-[0_0_34px_rgba(59,130,246,0.25)]"
-                    : "shadow-sm"
-                } ${sponsorStatusTone}`}
+                className={`mb-4 rounded-2xl border p-4 ${ULTRA_STABLE_DASHBOARD ? "shadow-sm" : "transition-all duration-500 shadow-sm"} ${sponsorStatusTone}`}
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <img
@@ -579,7 +895,7 @@ export default function LiveAuctionDashboard() {
                       <span className="rounded-full bg-white/70 px-2 py-0.5">
                         {activeSponsorPlayer?.category || activeSponsorLog.category || "Category"}
                       </span>
-                      {isSponsorPopoutAnimating && (
+                      {!ULTRA_STABLE_DASHBOARD && (
                         <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] uppercase tracking-wide">
                           Sponsor Spotlight
                         </span>
@@ -660,32 +976,15 @@ export default function LiveAuctionDashboard() {
                   </div>
                 </div>
 
-                <div
-                  className={`rounded-2xl border p-4 text-center ${
-                    timerCritical
-                      ? "border-red-200 bg-red-50"
-                      : timerWarning
-                      ? "border-amber-200 bg-amber-50"
-                      : "border-slate-200 bg-slate-50"
-                  }`}
-                >
-                  <p className="mb-1 flex items-center justify-center gap-1 text-sm text-slate-500">
-                    <Clock3 className="h-4 w-4" /> Live Timer
-                  </p>
-                  <p
-                    className={`text-3xl font-semibold ${
-                      timerCritical ? "text-red-700" : timerWarning ? "text-amber-700" : "text-slate-900"
-                    }`}
-                  >
-                    {formatMinutesSeconds(totalSeconds)}
-                  </p>
-                </div>
+                <LiveTimerCard isActive={Boolean(auctionState?.current_player)} />
 
                 <div>
                   <p className="mb-2 text-sm font-semibold text-slate-700">Top 3 Live Bids</p>
-                  <div className="space-y-2">
+                  <div className="min-h-[228px] space-y-2">
                     {topBids.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-slate-300 p-3 text-sm text-slate-500">No bids yet for this player.</div>
+                      <div className="flex min-h-[228px] items-center justify-center rounded-xl border border-dashed border-slate-300 p-3 text-sm text-slate-500">
+                        No bids yet for this player.
+                      </div>
                     ) : (
                       topBids.map((bid, index) => (
                         <div
@@ -772,242 +1071,21 @@ export default function LiveAuctionDashboard() {
             )}
           </div>
 
-          <div className="lg:col-span-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-              <Activity className="h-5 w-5 text-indigo-600" />
-              Category Stats & Auction Status
-            </h2>
-
-            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="w-full min-w-[420px] text-sm">
-                <thead className="bg-slate-50">
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-                    <th className="py-2">Category</th>
-                    <th className="text-right pr-2">Total Bid Amt.</th>
-                    <th className="text-right pr-2">Avg. Bid Amt.</th>
-                    <th className="text-right pr-2">Bidded Players</th>
-                    <th className="text-right pr-2">Highest Bid</th>
-                    <th className="text-right pr-2">Lowest Bid</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {categoryStats.map((row) => (
-                    <tr key={row.category} className="border-b border-slate-100 last:border-0 odd:bg-white even:bg-slate-50/40">
-                      <td className="py-2 pl-2 font-semibold">{row.category}</td>
-                      <td className="text-right pr-2">{formatMoney(row.total)}</td>
-                      <td className="text-right pr-2">{formatMoney(row.average)}</td>
-                      <td className="text-right pr-2">{row.count}</td>
-                      <td className="text-right pr-2">{formatMoney(row.highest)}</td>
-                      <td className="text-right pr-2">{formatMoney(row.lowest)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-sm font-semibold">Auction Status Summary</p>
-                <button
-                  onClick={() => setShowGrid(true)}
-                  className="rounded-full border border-slate-300 bg-white p-1 text-slate-600 transition hover:bg-slate-100"
-                  aria-label="Open complete player tracking grid"
-                >
-                  <Info className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="mb-4 grid grid-cols-3 gap-2 text-center text-sm">
-                <div className="rounded-xl bg-emerald-50 p-2">
-                  <p className="text-xs text-emerald-700">Confirmed Sales</p>
-                  <p className="font-semibold">{soldCount}</p>
-                </div>
-                <div className="rounded-xl bg-amber-50 p-2">
-                  <p className="text-xs text-amber-700">Final Unsold</p>
-                  <p className="font-semibold">{unsoldCount}</p>
-                </div>
-                <div className="rounded-xl bg-slate-200 p-2">
-                  <p className="text-xs text-slate-700">Pending</p>
-                  <p className="font-semibold">{pendingCount}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div
-                  className="relative h-20 w-20 rounded-full"
-                  style={{
-                    background: `conic-gradient(#2563eb ${completionPercent}%, #e2e8f0 ${completionPercent}% 100%)`,
-                  }}
-                >
-                  <div className="absolute inset-2 rounded-full bg-slate-50" />
-                  <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
-                    {completionPercent.toFixed(0)}%
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Completion Percentage</p>
-                  <p className="text-xs text-slate-500">(Confirmed Sales + Final Unsold) / Total Players</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <CategorySummarySection
+            categoryStats={categoryStats}
+            soldCount={soldCount}
+            unsoldCount={unsoldCount}
+            pendingCount={pendingCount}
+            completionPercent={completionPercent}
+            onOpenGrid={openGridOverlay}
+          />
         </section>
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <CircleDollarSign className="h-5 w-5 text-violet-600" />
-            Team Standings & Purse Status
-          </h2>
-
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-sm">
-              <thead className="sticky top-0 bg-slate-50">
-                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="py-2">Team Name</th>
-                  <th>Captain Name</th>
-                  <th className="text-right pr-2">Total Purse Given</th>
-                  <th className="text-right pr-2">Captain Deduction</th>
-                  <th className="text-right pr-2">Purse Available</th>
-                  <th className="text-right pr-2">Used</th>
-                  <th className="text-right pr-2">Remaining</th>
-                  <th>Player Category Tracker</th>
-                  <th className="text-right pr-2">Total Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {standings.map((row) => (
-                  <tr key={row.team.id} className="border-b border-slate-100 last:border-0 align-top hover:bg-slate-50/60">
-                    <td className="py-3">
-                      <div className="flex items-center gap-2 font-semibold">
-                        <img
-                          src={row.team.team_logo_url || imageFallback(row.team.team_name)}
-                          alt={row.team.team_name}
-                          className="h-7 w-7 rounded-lg border border-slate-200 bg-white object-cover"
-                        />
-                        {row.team.team_name}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={row.team.captain_image_url || imageFallback(row.team.captain_name)}
-                          alt={row.team.captain_name}
-                          className="h-7 w-7 rounded-full border border-slate-200 bg-white object-cover"
-                        />
-                        <span>{row.team.captain_name}</span>
-                      </div>
-                    </td>
-                    <td className="text-right pr-2 font-medium">{formatMoney(row.totalPurse)}</td>
-                    <td className="text-right pr-2">{formatMoney(row.captainDeduction)}</td>
-                    <td className="text-right pr-2">{formatMoney(row.purseAvailable)}</td>
-                    <td className="text-right pr-2">{formatMoney(row.used)}</td>
-                    <td className="text-right pr-2 font-semibold text-emerald-700">{formatMoney(row.remaining)}</td>
-                    <td>
-                      <div className="space-y-1 py-1">
-                        {CATEGORIES.map((category) => {
-                          const limit = STAR_LIMITS[category];
-                          const count = row.categoryCounts[category] || 0;
-                          return (
-                            <div key={`${row.team.id}-${category}`} className="flex items-center gap-2 text-xs">
-                              <span className="w-5 font-semibold">{category}</span>
-                              <div className="flex gap-1">
-                                {Array.from({ length: limit }).map((_, idx) => (
-                                  <span key={idx} className={idx < count ? "text-amber-500" : "text-slate-300"}>
-                                    {idx < count ? "★" : "☆"}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </td>
-                    <td className="pr-2 text-right font-semibold">{row.playerCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <TeamStandingsSection standings={standings} />
 
         <section className="grid gap-6 lg:grid-cols-12">
-          <div className="lg:col-span-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-              <Trophy className="h-5 w-5 text-amber-500" />
-              Top 10 Confirmed Sales
-            </h2>
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2">Rank</th>
-                    <th>Player Name</th>
-                    <th>Team Name</th>
-                    <th className="text-right pr-3">Sale Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topTenConfirmedSaleRows.map((player, index) => {
-                    if (!player) {
-                      return (
-                        <tr key={`placeholder-${index}`} className="border-t border-slate-100 text-slate-400">
-                          <td className="px-3 py-2 font-semibold">{index + 1}</td>
-                          <td>-</td>
-                          <td>-</td>
-                          <td className="pr-3 text-right">-</td>
-                        </tr>
-                      );
-                    }
-
-                    const soldTeam = relationOne<{ team_name?: string }>(player.team);
-                    return (
-                      <tr key={player.id} className="border-t border-slate-100">
-                        <td className={`px-3 py-2 font-semibold ${index < 3 ? "text-amber-600" : ""}`}>{index + 1}</td>
-                        <td>{player.name}</td>
-                        <td>{soldTeam?.team_name || "-"}</td>
-                        <td className="pr-3 text-right font-semibold text-emerald-700">
-                          {formatMoney(player.sold_price || 0)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="lg:col-span-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold">Recent Bids Ticker</h2>
-            {recentSales.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">No completed sales yet.</div>
-            ) : (
-              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 py-3">
-                <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-slate-50 to-transparent" />
-                <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-slate-50 to-transparent" />
-                <div className="sales-ticker-track flex w-max gap-3 px-3">
-                  {tickerCards.map((sale, idx) => {
-                    const salePlayer = relationOne<{ name?: string }>(sale.player);
-                    const saleTeam = relationOne<{ team_name?: string }>(sale.team);
-                    return (
-                      <div key={`${sale.id}-${idx}`} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm whitespace-nowrap">
-                        <span className="font-semibold">{salePlayer?.name || "Player"}</span>
-                        <span className="mx-2 text-slate-500">•</span>
-                        <span className="text-emerald-700">{formatMoney(sale.sale_price || 0)}</span>
-                        <span className="mx-2 text-slate-500">•</span>
-                        <span className="text-slate-600">{saleTeam?.team_name || "Unknown Team"}</span>
-                        <span className="mx-2 text-slate-300">•</span>
-                        <span className="text-xs text-slate-500">
-                          {sale.logged_at
-                            ? new Date(sale.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                            : "--:--"}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+          <TopSalesSection topTenConfirmedSaleRows={topTenConfirmedSaleRows} />
+          <RecentSalesTickerSection recentSales={recentSales} tickerCards={tickerCards} stableMode={ULTRA_STABLE_DASHBOARD} />
         </section>
       </div>
 
