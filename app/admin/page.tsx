@@ -9,7 +9,7 @@ import { useTimer } from '@/hooks/useTimer';
 import { formatMinutesSeconds, formatHoursMinutesSeconds } from '@/lib/services/timer/timerService';
 import { startTimer, pauseTimer, resumeTimer, updateTimerSettings } from '@/lib/actions/timer';
 import { assignCaptain, removeCaptain } from '@/lib/actions/captains';
-import { deployPlayer, markPlayerUnsold, finalizeSale, reAuctionPlayer } from '@/lib/actions/auction';
+import { deployPlayer, markPlayerUnsold, finalizeSale, reAuctionPlayer, resetAuction } from '@/lib/actions/auction';
 import { isPlayerEligibleForAuction } from "@/lib/validation/teamComposition";
 import { manualPurseDeduction, updateBasePrices } from '@/lib/actions/rules';
 import { banTeamFromBidding, unbanTeam, getBannedTeams } from '@/lib/actions/admin';
@@ -22,7 +22,7 @@ import {
     CheckCircle, XCircle, Activity, Shield,
     Trophy, Search, Filter, ChevronRight,
     Download, Upload, Plus, Trash2, Edit, X, Info,
-    ArrowUpRight, FileText, FilePlus, Zap
+    ArrowUpRight, FileText, FilePlus, Zap, RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
@@ -2567,6 +2567,20 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         }
     };
 
+    // Reset auction - remove player from auction without marking sold/unsold
+    const handleResetAuction = async () => {
+        if (!confirm('Are you sure you want to remove the current player from auction? This will reset the auction state.')) {
+            return;
+        }
+        
+        try {
+            await resetAuction();
+            alert('Auction has been reset. Player removed from auction.');
+        } catch (error: any) {
+            alert(error.message || 'Failed to reset auction');
+        }
+    };
+
     const handleExpiryConfirmSale = async () => {
         // User confirmed sale at current bid
         if (!auctionState?.current_player_id || !auctionState?.current_bidder_team_id) {
@@ -2727,6 +2741,16 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
                                         ) : (
                                             <><PauseCircle className="w-4 h-4" /> Pause</>
                                         )}
+                                    </button>
+                                )}
+
+                                {/* Reset Auction Button */}
+                                {auctionState?.current_player && (
+                                    <button
+                                        onClick={handleResetAuction}
+                                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500 hover:bg-red-500/20 font-display font-black text-xs uppercase tracking-widest transition-all"
+                                    >
+                                        <RotateCcw className="w-4 h-4" /> Reset
                                     </button>
                                 )}
                             </div>

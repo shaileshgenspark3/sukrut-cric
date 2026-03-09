@@ -480,3 +480,54 @@ export async function reAuctionPlayer(playerId: string) {
     throw error;
   }
 }
+
+/**
+ * Reset auction - removes current player from auction without marking as sold/unsold
+ */
+export async function resetAuction() {
+  try {
+    console.log('=== RESET AUCTION ===');
+
+    // Get auction state
+    const { data: auctionState, error: stateError } = await supabase
+      .from("auction_state")
+      .select("*")
+      .single();
+
+    if (stateError) {
+      throw new Error(`Failed to fetch auction state: ${stateError.message}`);
+    }
+
+    // Reset auction state
+    const { error: updateError } = await supabase
+      .from("auction_state")
+      .update({
+        status: "idle",
+        current_player_id: null,
+        current_base_price: null,
+        current_bid_amount: null,
+        current_bidder_team_id: null,
+        bid_count: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", auctionState.id);
+
+    if (updateError) {
+      throw new Error(`Failed to reset auction: ${updateError.message}`);
+    }
+
+    // Revalidate pages
+    revalidatePath("/admin");
+    revalidatePath("/captain");
+
+    console.log('=== AUCTION RESET SUCCESS ===');
+    return {
+      success: true,
+      message: "Auction has been reset",
+    };
+  } catch (error: any) {
+    console.error('=== RESET AUCTION ERROR ===');
+    console.error('Error:', error);
+    throw new Error(error.message || "Failed to reset auction");
+  }
+}
