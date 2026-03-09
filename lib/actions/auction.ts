@@ -25,11 +25,16 @@ const FinalizeSaleSchema = z.object({
  * Deploy a player to auction
  * Validates player eligibility and updates auction_state
  */
-export async function deployPlayer(playerId: string) {
+export async function deployPlayer(playerId: string): Promise<{ success: boolean; message: string; playerId: string }> {
+  console.log('=== DEPLOY PLAYER START ===');
+  console.log('Player ID:', playerId);
+
+  // Validate input first
+  if (!playerId || typeof playerId !== 'string') {
+    throw new Error('Invalid player ID provided');
+  }
+
   try {
-    console.log('=== DEPLOY PLAYER START ===');
-    console.log('Player ID:', playerId);
-    
     const validated = DeployPlayerSchema.parse({ playerId });
     console.log('Validated player ID:', validated.playerId);
 
@@ -118,14 +123,18 @@ export async function deployPlayer(playerId: string) {
 
     // 5. Start the auction timer via RPC
     console.log('Step 5: Starting auction timer...');
-    const { error: timerError } = await supabase.rpc("start_auction_timer", {
-      p_initial_seconds: timerSeconds,
-    });
+    try {
+      const { error: timerError } = await supabase.rpc("start_auction_timer", {
+        p_initial_seconds: timerSeconds,
+      });
 
-    console.log('Timer RPC error:', timerError);
+      console.log('Timer RPC error:', timerError);
 
-    if (timerError) {
-      console.error("Timer start warning:", timerError.message);
+      if (timerError) {
+        console.error("Timer start warning:", timerError.message);
+      }
+    } catch (timerRpcError: any) {
+      console.error("Timer RPC exception:", timerRpcError?.message);
       // Continue even if timer fails - admin can start manually
     }
 
@@ -138,7 +147,7 @@ export async function deployPlayer(playerId: string) {
       console.log('Revalidated /captain');
     } catch (revalError: any) {
       console.error('Revalidation error:', revalError);
-      throw new Error(`Revalidation failed: ${revalError.message}`);
+      // Don't throw on revalidation error - it's not critical
     }
 
     console.log('=== DEPLOY PLAYER SUCCESS ===');
@@ -149,17 +158,18 @@ export async function deployPlayer(playerId: string) {
     };
   } catch (error: any) {
     console.error('=== DEPLOY PLAYER ERROR ===');
-    console.error('Error type:', error?.constructor?.name);
-    console.error('Error name:', error?.name);
+    console.error('Error:', error);
     console.error('Error message:', error?.message);
-    console.error('Error stack:', error?.stack);
-    console.error('Full error:', JSON.stringify(error, null, 2));
     console.error('==============================');
     
+    // Always throw a string message, not an object
     if (error instanceof z.ZodError) {
       throw new Error(`Validation error: ${error.issues[0].message}`);
     }
-    throw error;
+    if (error instanceof Error) {
+      throw new Error(error.message);
+    }
+    throw new Error(String(error));
   }
 }
 
