@@ -41,6 +41,49 @@ export async function manualPurseDeduction(teamId: string, amount: number, reaso
   return { success: true, newPurse };
 }
 
+export async function setCaptainDeduction(ruleId: string, amount: number) {
+  const nextDeduction = Math.max(0, amount || 0);
+
+  const { data: rule, error: fetchError } = await supabase
+    .from("auction_rules")
+    .select("id, team_id, captain_deduction, current_purse")
+    .eq("id", ruleId)
+    .single();
+
+  if (fetchError || !rule) {
+    throw new Error(`Auction rules not found: ${fetchError?.message || "Unknown error"}`);
+  }
+
+  const previousDeduction = rule.captain_deduction || 0;
+  const deductionDelta = nextDeduction - previousDeduction;
+  const nextCurrentPurse = (rule.current_purse || 0) - deductionDelta;
+
+  if (nextCurrentPurse < 0) {
+    throw new Error("Captain deduction would result in negative purse");
+  }
+
+  const { error: updateError } = await supabase
+    .from("auction_rules")
+    .update({
+      captain_deduction: nextDeduction,
+      current_purse: nextCurrentPurse,
+    })
+    .eq("id", ruleId);
+
+  if (updateError) {
+    throw new Error("Failed to update captain deduction: " + updateError.message);
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/captain");
+
+  return {
+    success: true,
+    captainDeduction: nextDeduction,
+    currentPurse: nextCurrentPurse,
+  };
+}
+
 export async function updateBasePrices(basePrices: {
   A_plus: number;
   A: number;
@@ -50,10 +93,10 @@ export async function updateBasePrices(basePrices: {
   const { error } = await supabase
     .from("tournament_settings")
     .update({
-      base_price_A_plus: basePrices.A_plus,
-      base_price_A: basePrices.A,
-      base_price_B: basePrices.B,
-      base_price_F: basePrices.F,
+      base_price_a_plus: basePrices.A_plus,
+      base_price_a: basePrices.A,
+      base_price_b: basePrices.B,
+      base_price_f: basePrices.F,
       updated_at: new Date().toISOString()
     })
     .neq("id", null); // Update all rows (should be single row)

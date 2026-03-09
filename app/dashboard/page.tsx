@@ -12,7 +12,6 @@ import Link from "next/link";
 
 const CATEGORIES = ["A+", "A", "B", "F"] as const;
 const STAR_LIMITS: Record<string, number> = { "A+": 1, A: 3, B: 4, F: 1 };
-const PURSE_SCALE = 100;
 const DASHBOARD_FONT = "'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif";
 const SPONSOR_POPOUT_ANIMATION_MS = 5000;
 const HEARTBEAT_INTERVAL_MS = 15000;
@@ -54,8 +53,6 @@ type DashboardAuctionState = {
 
 const formatMoney = (amount: number | null | undefined) =>
   `₹${Math.max(0, Math.round(amount || 0)).toLocaleString("en-IN")}`;
-
-const scaled = (value: number | null | undefined) => (value || 0) * PURSE_SCALE;
 
 const imageFallback = (seed: string) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed || "SPL")}`;
@@ -271,7 +268,7 @@ export default function LiveAuctionDashboard() {
       const teamPlayers = players.filter((player) => player.sold_to_team_id === team.id && player.is_sold);
       const usedRaw = teamPlayers.reduce((sum, player) => sum + (player.sold_price || 0), 0);
       const rule = rules.find((item) => item.team_id === team.id);
-      const startingPurseRaw = rule?.starting_purse ?? settings?.global_purse ?? 30000;
+      const startingPurseRaw = rule?.starting_purse ?? settings?.global_purse ?? 3000000;
       const captainDeductionRaw = rule?.captain_deduction ?? 0;
       const purseAvailableRaw = startingPurseRaw - captainDeductionRaw;
       const remainingRaw = rule?.current_purse ?? Math.max(0, purseAvailableRaw - usedRaw);
@@ -285,11 +282,11 @@ export default function LiveAuctionDashboard() {
 
       return {
         team,
-        totalPurse: scaled(startingPurseRaw),
-        captainDeduction: scaled(captainDeductionRaw),
-        purseAvailable: scaled(purseAvailableRaw),
-        used: scaled(usedRaw),
-        remaining: scaled(remainingRaw),
+        totalPurse: startingPurseRaw,
+        captainDeduction: captainDeductionRaw,
+        purseAvailable: purseAvailableRaw,
+        used: usedRaw,
+        remaining: remainingRaw,
         playerCount: teamPlayers.length,
         categoryCounts,
       };
@@ -581,7 +578,7 @@ export default function LiveAuctionDashboard() {
                     <p className="text-sm font-semibold text-slate-700">
                       {activeSponsorLog.status === "unsold"
                         ? "No winning bid registered • Final unsold"
-                        : `Final Bid: ${formatMoney(scaled(activeSponsorLog.sale_price || 0))}`}
+                        : `Final Bid: ${formatMoney(activeSponsorLog.sale_price || 0)}`}
                     </p>
                     <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
                       <span>Team: {activeSponsorTeam?.team_name || "N/A"}</span>
@@ -641,8 +638,8 @@ export default function LiveAuctionDashboard() {
                         <span className="rounded-full bg-indigo-100 px-3 py-1 text-indigo-700">{auctionState.current_player.playing_role}</span>
                       </div>
                       <h3 className="text-xl font-semibold">{auctionState.current_player.name}</h3>
-                      <p className="text-sm text-slate-500">Base Price: {formatMoney(scaled(auctionState.current_player.base_price || 0))}</p>
-                      <p className="mt-1 text-lg font-semibold text-emerald-700">Current Bid: {formatMoney(scaled(currentBid))}</p>
+                      <p className="text-sm text-slate-500">Base Price: {formatMoney(auctionState.current_player.base_price || 0)}</p>
+                      <p className="mt-1 text-lg font-semibold text-emerald-700">Current Bid: {formatMoney(currentBid)}</p>
                       {auctionState?.current_bidder && (
                         <p className="mt-1 text-xs text-slate-500">
                           Highest bidder: <span className="font-semibold text-slate-700">{auctionState.current_bidder.team_name}</span>
@@ -705,7 +702,7 @@ export default function LiveAuctionDashboard() {
                               </div>
                             </div>
                           </div>
-                          <p className="text-sm font-semibold text-emerald-700">{formatMoney(scaled(bid.bid_amount))}</p>
+                          <p className="text-sm font-semibold text-emerald-700">{formatMoney(bid.bid_amount)}</p>
                         </div>
                       ))
                     )}
@@ -739,11 +736,11 @@ export default function LiveAuctionDashboard() {
                   {categoryStats.map((row) => (
                     <tr key={row.category} className="border-b border-slate-100 last:border-0 odd:bg-white even:bg-slate-50/40">
                       <td className="py-2 pl-2 font-semibold">{row.category}</td>
-                      <td className="text-right pr-2">{formatMoney(scaled(row.total))}</td>
-                      <td className="text-right pr-2">{formatMoney(scaled(row.average))}</td>
+                      <td className="text-right pr-2">{formatMoney(row.total)}</td>
+                      <td className="text-right pr-2">{formatMoney(row.average)}</td>
                       <td className="text-right pr-2">{row.count}</td>
-                      <td className="text-right pr-2">{formatMoney(scaled(row.highest))}</td>
-                      <td className="text-right pr-2">{formatMoney(scaled(row.lowest))}</td>
+                      <td className="text-right pr-2">{formatMoney(row.highest)}</td>
+                      <td className="text-right pr-2">{formatMoney(row.lowest)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -911,7 +908,7 @@ export default function LiveAuctionDashboard() {
                         <td>{player.name}</td>
                         <td>{soldTeam?.team_name || "-"}</td>
                         <td className="pr-3 text-right font-semibold text-emerald-700">
-                          {formatMoney(scaled(player.sold_price || 0))}
+                          {formatMoney(player.sold_price || 0)}
                         </td>
                       </tr>
                     );
@@ -937,7 +934,7 @@ export default function LiveAuctionDashboard() {
                       <div key={`${sale.id}-${idx}`} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm whitespace-nowrap">
                         <span className="font-semibold">{salePlayer?.name || "Player"}</span>
                         <span className="mx-2 text-slate-500">•</span>
-                        <span className="text-emerald-700">{formatMoney(scaled(sale.sale_price || 0))}</span>
+                        <span className="text-emerald-700">{formatMoney(sale.sale_price || 0)}</span>
                         <span className="mx-2 text-slate-500">•</span>
                         <span className="text-slate-600">{saleTeam?.team_name || "Unknown Team"}</span>
                         <span className="mx-2 text-slate-300">•</span>
@@ -1136,7 +1133,7 @@ export default function LiveAuctionDashboard() {
                                     <td className="font-medium">{player.name}</td>
                                     <td>{player.age || "-"}</td>
                                     <td className="pr-3 text-right font-semibold text-emerald-700">
-                                      {formatMoney(scaled(player.sold_price || 0))}
+                                      {formatMoney(player.sold_price || 0)}
                                     </td>
                                     <td className="pr-3">{player.handy || "-"}</td>
                                   </tr>
@@ -1215,7 +1212,7 @@ export default function LiveAuctionDashboard() {
 
                             <p className="mt-1 text-xs text-slate-600">
                               {playerStatus === "sold"
-                                ? `${formatMoney(scaled(resolvedBid))} • ${resolvedTeam?.team_name || "Unknown Team"} • ${
+                                ? `${formatMoney(resolvedBid)} • ${resolvedTeam?.team_name || "Unknown Team"} • ${
                                     resolvedTeam?.captain_name || "Captain"
                                   }`
                                 : playerStatus === "unsold"

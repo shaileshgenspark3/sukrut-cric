@@ -71,6 +71,32 @@ export async function reverseSale(
       previous_state: logEntry,
     });
 
+    const previousPlayerState = {
+      is_sold: true,
+      sold_to_team_id: logEntry.team_id,
+      sold_price: logEntry.sale_price,
+    };
+
+    let teamRules: { current_purse: number } | null = null;
+    if (logEntry.team_id && logEntry.sale_price) {
+      const { data } = await supabaseAdmin
+        .from("auction_rules")
+        .select("current_purse")
+        .eq("team_id", logEntry.team_id)
+        .single();
+
+      teamRules = data;
+
+      if (!teamRules) {
+        throw new Error("Team rules not found for refund");
+      }
+    }
+
+    const { data: stateData, error: stateError } = await supabaseAdmin
+      .from("auction_state")
+      .select("*")
+      .single();
+
     const { error: playerError } = await supabaseAdmin
       .from("players")
       .update({
@@ -84,25 +110,24 @@ export async function reverseSale(
       throw new Error(`Failed to restore player: ${playerError.message}`);
     }
 
-    if (logEntry.team_id && logEntry.sale_price) {
-      const { data: teamRules } = await supabaseAdmin
+    let purseRefunded = false;
+    if (logEntry.team_id && logEntry.sale_price && teamRules) {
+      const { error: purseError } = await supabaseAdmin
         .from("auction_rules")
-        .select("current_purse")
-        .eq("team_id", logEntry.team_id)
-        .single();
+        .update({
+          current_purse: teamRules.current_purse + (logEntry.sale_price || 0),
+        })
+        .eq("team_id", logEntry.team_id);
 
-      if (teamRules) {
-        const { error: purseError } = await supabaseAdmin
-          .from("auction_rules")
-          .update({
-            current_purse: teamRules.current_purse + (logEntry.sale_price || 0),
-          })
-          .eq("team_id", logEntry.team_id);
-
-        if (purseError) {
-          throw new Error(`Failed to refund team purse: ${purseError.message}`);
-        }
+      if (purseError) {
+        await supabaseAdmin
+          .from("players")
+          .update(previousPlayerState)
+          .eq("id", logEntry.player_id);
+        throw new Error(`Failed to refund team purse: ${purseError.message}`);
       }
+
+      purseRefunded = true;
     }
 
     let saleAuctionRound: number | null = null;
@@ -134,25 +159,9 @@ export async function reverseSale(
       }
     }
 
-    if (saleAuctionRound != null) {
-      const { error: bidsError } = await supabaseAdmin
-        .from("bids")
-        .delete()
-        .eq("player_id", logEntry.player_id)
-        .eq("auction_round", saleAuctionRound);
-
-      if (bidsError) {
-        console.error("Warning: Failed to clear bids for reversed round:", bidsError.message);
-      }
-    }
-
-    const { data: stateData, error: stateError } = await supabaseAdmin
-      .from("auction_state")
-      .select("*")
-      .single();
-
+    let auctionStateReset = false;
     if (!stateError && stateData && stateData.current_player_id === logEntry.player_id) {
-      await supabaseAdmin
+      const { error: resetError } = await supabaseAdmin
         .from("auction_state")
         .update({
           current_player_id: null,
@@ -165,6 +174,24 @@ export async function reverseSale(
           updated_at: new Date().toISOString(),
         })
         .eq("id", stateData.id);
+
+      if (resetError) {
+        if (purseRefunded && logEntry.team_id && teamRules) {
+          await supabaseAdmin
+            .from("auction_rules")
+            .update({ current_purse: teamRules.current_purse })
+            .eq("team_id", logEntry.team_id);
+        }
+
+        await supabaseAdmin
+          .from("players")
+          .update(previousPlayerState)
+          .eq("id", logEntry.player_id);
+
+        throw new Error(`Failed to reset auction state: ${resetError.message}`);
+      }
+
+      auctionStateReset = true;
     }
 
     const { error: deleteError } = await supabaseAdmin
@@ -177,7 +204,51 @@ export async function reverseSale(
       .eq("id", validated.logId);
 
     if (deleteError) {
+      if (auctionStateReset && stateData) {
+        await supabaseAdmin
+          .from("auction_state")
+          .update({
+            current_player_id: stateData.current_player_id,
+            current_base_price: stateData.current_base_price,
+            current_bid: stateData.current_bid,
+            current_bid_amount: stateData.current_bid_amount,
+            bid_count: stateData.bid_count,
+            status: stateData.status,
+            current_bidder_team_id: stateData.current_bidder_team_id,
+            timer_end: stateData.timer_end,
+            is_paused: stateData.is_paused,
+            paused_at: stateData.paused_at,
+            last_bid_at: stateData.last_bid_at,
+            updated_at: stateData.updated_at,
+          })
+          .eq("id", stateData.id);
+      }
+
+      if (purseRefunded && logEntry.team_id && teamRules) {
+        await supabaseAdmin
+          .from("auction_rules")
+          .update({ current_purse: teamRules.current_purse })
+          .eq("team_id", logEntry.team_id);
+      }
+
+      await supabaseAdmin
+        .from("players")
+        .update(previousPlayerState)
+        .eq("id", logEntry.player_id);
+
       throw new Error(`Failed to mark log as deleted: ${deleteError.message}`);
+    }
+
+    if (saleAuctionRound != null) {
+      const { error: bidsError } = await supabaseAdmin
+        .from("bids")
+        .delete()
+        .eq("player_id", logEntry.player_id)
+        .eq("auction_round", saleAuctionRound);
+
+      if (bidsError) {
+        console.error("Warning: Failed to clear bids for reversed round:", bidsError.message);
+      }
     }
 
     revalidateAuctionViews();

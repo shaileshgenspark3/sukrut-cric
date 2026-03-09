@@ -11,9 +11,10 @@ import { startTimer, pauseTimer, resumeTimer, updateTimerSettings } from '@/lib/
 import { assignCaptain, removeCaptain } from '@/lib/actions/captains';
 import { deployPlayer, finalizeSale, reAuctionPlayer, resetAuction } from '@/lib/actions/auction';
 import { isPlayerEligibleForAuction } from "@/lib/validation/teamComposition";
-import { manualPurseDeduction, updateBasePrices } from '@/lib/actions/rules';
+import { manualPurseDeduction, setCaptainDeduction, updateBasePrices } from '@/lib/actions/rules';
 import { banTeamFromBidding, unbanTeam, getBannedTeams } from '@/lib/actions/admin';
 import { createLogEntry } from '@/lib/actions/logging';
+import { runPricingAudit, type PricingAuditResult } from '@/lib/actions/pricingAudit';
 import { AuctionLogs } from '@/components/admin/AuctionLogs';
 import { ManualSaleModal } from '@/components/admin/ManualSaleModal';
 import {
@@ -234,7 +235,7 @@ export default function AdminDashboard() {
             <main className="flex-1 p-6 md:p-8 overflow-y-auto">
                 {activeTab === "dashboard" && <OverviewTab teams={teams} players={players} settings={settings} {...modalProps} />}
                 {activeTab === "players" && <PlayersTab players={players} {...modalProps} />}
-                {activeTab === "captain" && <CaptainSelectionTab teams={teams} players={players} />}
+                {activeTab === "captain" && <CaptainSelectionTab teams={teams} players={players} settings={settings} />}
                 {activeTab === "rules" && <RulesTab rules={rules} settings={settings} />}
                 {activeTab === "auction-inputs" && <AuctionInputsTab settings={settings} />}
                 {activeTab === "live" && <LiveControllerTab auctionState={auctionState} settings={settings} players={players} teams={teams} />}
@@ -1970,6 +1971,9 @@ function downloadCSV(csvContent: string, filename: string) {
 function RulesTab({ rules, settings }: any) {
     const queryClient = useQueryClient();
     const [globalPurse, setGlobalPurse] = useState(settings?.global_purse?.toString() || "3000000");
+    const [pricingAudit, setPricingAudit] = useState<PricingAuditResult | null>(null);
+    const [pricingAuditLoading, setPricingAuditLoading] = useState(false);
+    const [pricingAuditError, setPricingAuditError] = useState("");
 
     // Manual deduction state
     const [deductionTeamId, setDeductionTeamId] = useState("");
@@ -1978,11 +1982,27 @@ function RulesTab({ rules, settings }: any) {
 
     // Base prices state
     const [basePrices, setBasePrices] = useState({
-        A_plus: settings?.base_price_A_plus?.toString() || "500000",
-        A: settings?.base_price_A?.toString() || "200000",
-        B: settings?.base_price_B?.toString() || "100000",
-        F: settings?.base_price_F?.toString() || "50000"
+        A_plus: settings?.base_price_a_plus?.toString() || "500000",
+        A: settings?.base_price_a?.toString() || "200000",
+        B: settings?.base_price_b?.toString() || "100000",
+        F: settings?.base_price_f?.toString() || "50000"
     });
+
+    useEffect(() => {
+        setGlobalPurse(settings?.global_purse?.toString() || "3000000");
+        setBasePrices({
+            A_plus: settings?.base_price_a_plus?.toString() || "500000",
+            A: settings?.base_price_a?.toString() || "200000",
+            B: settings?.base_price_b?.toString() || "100000",
+            F: settings?.base_price_f?.toString() || "50000"
+        });
+    }, [
+        settings?.global_purse,
+        settings?.base_price_a_plus,
+        settings?.base_price_a,
+        settings?.base_price_b,
+        settings?.base_price_f,
+    ]);
 
     const updateGlobalPurse = async () => {
         try {
@@ -2025,8 +2045,12 @@ function RulesTab({ rules, settings }: any) {
     };
 
     const updateDeduction = async (ruleId: string, val: string) => {
-        await supabase.from("auction_rules").update({ captain_deduction: parseInt(val) || 0 }).eq("id", ruleId);
-        queryClient.invalidateQueries({ queryKey: ["rules"] });
+        try {
+            await setCaptainDeduction(ruleId, parseInt(val) || 0);
+            queryClient.invalidateQueries({ queryKey: ["rules"] });
+        } catch (error: any) {
+            alert(error.message || "Failed to update captain deduction");
+        }
     };
 
     const handleManualDeduction = async () => {
@@ -2071,6 +2095,59 @@ function RulesTab({ rules, settings }: any) {
         }
     };
 
+    const handleRunPricingAudit = async () => {
+        setPricingAuditLoading(true);
+        setPricingAuditError("");
+
+        try {
+            const result = await runPricingAudit();
+            setPricingAudit(result);
+        } catch (err: any) {
+            setPricingAuditError(err.message || "Failed to run pricing audit");
+        } finally {
+            setPricingAuditLoading(false);
+        }
+    };
+
+    const handleExportPricingAudit = () => {
+        if (!pricingAudit) {
+            alert("Run pricing audit first, then export the latest report.");
+            return;
+        }
+
+        const checkedAt = new Date(pricingAudit.checkedAt);
+        const safeTimestamp = pricingAudit.checkedAt.replace(/[:.]/g, "-");
+        const csvRows: (string | number)[][] = [
+            ["Pricing Audit Report"],
+            ["Checked At", checkedAt.toLocaleString("en-IN")],
+            ["Status", pricingAudit.ok ? "Clean" : "Issues Found"],
+            ["Tournament Purse", pricingAudit.tournamentPurse],
+            ["Teams", pricingAudit.totals.teams],
+            ["Players", pricingAudit.totals.players],
+            ["Rules Rows", pricingAudit.totals.rules],
+            ["Active Logs", pricingAudit.totals.activeLogs],
+            ["Issue Count", pricingAudit.issues.length],
+            [],
+            ["Severity", "Code", "Message", "Team", "Player"],
+            ...(
+                pricingAudit.issues.length > 0
+                    ? pricingAudit.issues.map((issue) => [
+                        issue.severity.toUpperCase(),
+                        issue.code,
+                        issue.message,
+                        issue.teamName || "",
+                        issue.playerName || "",
+                    ])
+                    : [["INFO", "audit_clean", "No pricing issues found.", "", ""]]
+            ),
+        ];
+
+        downloadCSV(
+            Papa.unparse(csvRows),
+            `pricing-audit-report-${safeTimestamp}.csv`
+        );
+    };
+
     return (
         <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
@@ -2105,6 +2182,161 @@ function RulesTab({ rules, settings }: any) {
                 </div>
             </div>
 
+            <div className="glass-card bg-slate-900/60 p-6 rounded-[2rem] border-white/5">
+                <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
+                    <div className="space-y-3 max-w-3xl">
+                        <div className="flex items-center gap-3">
+                            <div className="w-11 h-11 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                                <Search className="w-5 h-5 text-primary" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-display font-black text-white tracking-[0.2em] uppercase">Pricing Audit</h3>
+                                <p className="text-[11px] text-slate-500 font-bold tracking-[0.18em] uppercase">
+                                    Verify live pricing, purse balances, captain deductions & sale integrity
+                                </p>
+                            </div>
+                        </div>
+                        <p className="text-sm text-slate-300 leading-relaxed">
+                            Run a live audit across deployed base prices, sold-player team assignments, captain pricing deductions,
+                            auction rules rows, and completed sale logs.
+                        </p>
+                        {pricingAudit && (
+                            <div className="flex flex-wrap items-center gap-3 text-xs font-bold tracking-[0.16em] uppercase">
+                                <span
+                                    className={`rounded-full border px-3 py-1.5 ${
+                                        pricingAudit.ok
+                                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                            : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                                    }`}
+                                >
+                                    {pricingAudit.ok ? "Audit Clean" : `${pricingAudit.issues.length} Issue${pricingAudit.issues.length === 1 ? "" : "s"} Detected`}
+                                </span>
+                                <span className="text-slate-500">
+                                    Last checked {new Date(pricingAudit.checkedAt).toLocaleString('en-IN')}
+                                </span>
+                            </div>
+                        )}
+                        {pricingAuditError && (
+                            <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                                {pricingAuditError}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3 shrink-0">
+                        <button
+                            onClick={handleRunPricingAudit}
+                            disabled={pricingAuditLoading}
+                            className="h-[54px] rounded-2xl bg-primary px-6 text-xs font-display font-black tracking-[0.18em] text-white shadow-[0_10px_30px_rgba(59,130,246,0.18)] transition-all hover:scale-105 hover:bg-primary/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 uppercase"
+                        >
+                            {pricingAuditLoading ? (
+                                <span className="inline-flex items-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Running Audit
+                                </span>
+                            ) : (
+                                <span className="inline-flex items-center gap-2">
+                                    <Activity className="w-4 h-4" />
+                                    Run Pricing Audit
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={handleExportPricingAudit}
+                            disabled={!pricingAudit || pricingAuditLoading}
+                            className="h-[54px] rounded-2xl border border-white/10 bg-white/5 px-6 text-xs font-display font-black tracking-[0.18em] text-white transition-all hover:scale-105 hover:bg-white/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 uppercase"
+                        >
+                            <span className="inline-flex items-center gap-2">
+                                <Download className="w-4 h-4" />
+                                Export Audit Report
+                            </span>
+                        </button>
+                    </div>
+                </div>
+
+                {pricingAudit && (
+                    <div className="mt-6 space-y-6">
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                            <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-4">
+                                <p className="text-[10px] text-slate-500 font-black tracking-[0.24em] uppercase">Tournament Purse</p>
+                                <p className="mt-2 text-lg font-display font-black text-white tracking-tight">
+                                    ₹{pricingAudit.tournamentPurse.toLocaleString()}
+                                </p>
+                            </div>
+                            <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-4">
+                                <p className="text-[10px] text-slate-500 font-black tracking-[0.24em] uppercase">Teams</p>
+                                <p className="mt-2 text-lg font-display font-black text-white tracking-tight">{pricingAudit.totals.teams}</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-4">
+                                <p className="text-[10px] text-slate-500 font-black tracking-[0.24em] uppercase">Players</p>
+                                <p className="mt-2 text-lg font-display font-black text-white tracking-tight">{pricingAudit.totals.players}</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-4">
+                                <p className="text-[10px] text-slate-500 font-black tracking-[0.24em] uppercase">Rules Rows</p>
+                                <p className="mt-2 text-lg font-display font-black text-white tracking-tight">{pricingAudit.totals.rules}</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-4">
+                                <p className="text-[10px] text-slate-500 font-black tracking-[0.24em] uppercase">Active Logs</p>
+                                <p className="mt-2 text-lg font-display font-black text-white tracking-tight">{pricingAudit.totals.activeLogs}</p>
+                            </div>
+                        </div>
+
+                        <div className="rounded-[1.75rem] border border-white/5 bg-slate-950/60 overflow-hidden">
+                            <div className="flex items-center justify-between gap-4 border-b border-white/5 px-5 py-4">
+                                <div>
+                                    <p className="text-xs font-display font-black text-white tracking-[0.18em] uppercase">Audit Findings</p>
+                                    <p className="text-xs text-slate-500 font-bold tracking-[0.12em] uppercase">
+                                        Errors require repair • warnings should be reviewed
+                                    </p>
+                                </div>
+                                <div className={`rounded-full px-3 py-1.5 text-[10px] font-black tracking-[0.18em] uppercase ${
+                                    pricingAudit.ok
+                                        ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                                        : "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                                }`}>
+                                    {pricingAudit.ok ? "No Issues Found" : `${pricingAudit.issues.length} Total`}
+                                </div>
+                            </div>
+
+                            {pricingAudit.issues.length === 0 ? (
+                                <div className="px-5 py-8 text-center">
+                                    <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
+                                    <p className="text-base font-display font-black text-white tracking-tight">All monitored pricing workflows look consistent.</p>
+                                    <p className="mt-2 text-sm text-slate-400">
+                                        Base prices, captain deductions, purse rows, and completed sale records are aligned.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="divide-y divide-white/5">
+                                    {pricingAudit.issues.map((issue, index) => (
+                                        <div key={`${issue.code}-${issue.teamId || issue.playerId || index}`} className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 px-5 py-4">
+                                            <div className="space-y-2">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black tracking-[0.18em] uppercase ${
+                                                        issue.severity === "error"
+                                                            ? "bg-destructive/10 text-destructive border border-destructive/20"
+                                                            : "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                                                    }`}>
+                                                        {issue.severity}
+                                                    </span>
+                                                    <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-black tracking-[0.18em] text-slate-300 uppercase">
+                                                        {issue.code.replaceAll("_", " ")}
+                                                    </span>
+                                                </div>
+                                                <p className="text-sm text-white">{issue.message}</p>
+                                            </div>
+                                            <div className="text-xs text-slate-400 font-medium md:text-right">
+                                                {issue.teamName && <p>Team: <span className="text-slate-200">{issue.teamName}</span></p>}
+                                                {issue.playerName && <p>Player: <span className="text-slate-200">{issue.playerName}</span></p>}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
 
             {/* Manual Purse Deduction */}
             <div className="glass-card bg-slate-900/60 p-6 rounded-[2rem] border-white/5">
@@ -2232,9 +2464,11 @@ function RulesTab({ rules, settings }: any) {
     );
 }
 
-function CaptainSelectionTab({ teams, players }: any) {
+function CaptainSelectionTab({ teams, players, settings }: any) {
     const queryClient = useQueryClient();
     const [selectedCaptainId, setSelectedCaptainId] = useState<Record<string, string>>({});
+    const captainCostAPlus = settings?.base_price_a_plus ?? 500000;
+    const captainCostA = settings?.base_price_a ?? 200000;
 
     // Filter available players (not captain, not sold)
     const availablePlayers = players?.filter((p: any) => !p.is_captain && !p.is_sold) || [];
@@ -2350,7 +2584,7 @@ function CaptainSelectionTab({ teams, players }: any) {
                 <div className="flex items-center gap-3 mb-4">
                     <Info className="w-5 h-5 text-gold" />
                     <p className="text-sm text-slate-400 font-medium">
-                        <span className="text-gold font-bold">Note:</span> A+ category captains cost ₹5,00,000, A category captains cost ₹2,00,000. B and F category captains are free.
+                        <span className="text-gold font-bold">Note:</span> A+ category captains cost ₹{captainCostAPlus.toLocaleString()}, A category captains cost ₹{captainCostA.toLocaleString()}. B and F category captains are free.
                         Captains are automatically added to team roster and cannot be auctioned.
                     </p>
                 </div>

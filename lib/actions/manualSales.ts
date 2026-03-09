@@ -111,19 +111,6 @@ export async function createManualSale(
       throw new Error(validation.errors.join(", "));
     }
 
-    const { error: playerError } = await supabaseAdmin
-      .from("players")
-      .update({
-        is_sold: true,
-        sold_to_team_id: validated.teamId,
-        sold_price: validated.salePrice,
-      })
-      .eq("id", validated.playerId);
-
-    if (playerError) {
-      throw new Error(`Failed to update player: ${playerError.message}`);
-    }
-
     const { data: teamRules } = await supabaseAdmin
       .from("auction_rules")
       .select("current_purse")
@@ -140,6 +127,23 @@ export async function createManualSale(
       );
     }
 
+    let playerUpdated = false;
+    let purseUpdated = false;
+
+    const { error: playerError } = await supabaseAdmin
+      .from("players")
+      .update({
+        is_sold: true,
+        sold_to_team_id: validated.teamId,
+        sold_price: validated.salePrice,
+      })
+      .eq("id", validated.playerId);
+
+    if (playerError) {
+      throw new Error(`Failed to update player: ${playerError.message}`);
+    }
+    playerUpdated = true;
+
     const { error: purseError } = await supabaseAdmin
       .from("auction_rules")
       .update({
@@ -148,8 +152,17 @@ export async function createManualSale(
       .eq("team_id", validated.teamId);
 
     if (purseError) {
+      await supabaseAdmin
+        .from("players")
+        .update({
+          is_sold: false,
+          sold_to_team_id: null,
+          sold_price: null,
+        })
+        .eq("id", validated.playerId);
       throw new Error(`Failed to update team purse: ${purseError.message}`);
     }
+    purseUpdated = true;
 
     const { createLogEntry } = await import("@/lib/actions/logging");
     const logResult = await createLogEntry(
@@ -161,14 +174,36 @@ export async function createManualSale(
     );
 
     if (!logResult.success) {
-      console.error("Warning: Failed to create log entry:", logResult.message);
+      if (purseUpdated) {
+        await supabaseAdmin
+          .from("auction_rules")
+          .update({
+            current_purse: teamRules.current_purse,
+          })
+          .eq("team_id", validated.teamId);
+      }
+
+      if (playerUpdated) {
+        await supabaseAdmin
+          .from("players")
+          .update({
+            is_sold: false,
+            sold_to_team_id: null,
+            sold_price: null,
+          })
+          .eq("id", validated.playerId);
+      }
+
+      throw new Error(logResult.message);
     }
 
+    const createdLogId = logResult.logId;
+
     if (validated.mode === "override") {
-      await supabaseAdmin.from("audit_log").insert({
+      const { error: auditError } = await supabaseAdmin.from("audit_log").insert({
         action_type: "manual_sale",
         entity_type: "sale",
-        entity_id: logResult.logId,
+        entity_id: createdLogId,
         reason: "Override mode: bypassed validation",
         previous_state: {
           player_id: validated.playerId,
@@ -178,6 +213,33 @@ export async function createManualSale(
           validation_warnings: validation.warnings,
         },
       });
+
+      if (auditError) {
+        await supabaseAdmin
+          .from("auction_rules")
+          .update({
+            current_purse: teamRules.current_purse,
+          })
+          .eq("team_id", validated.teamId);
+
+        await supabaseAdmin
+          .from("players")
+          .update({
+            is_sold: false,
+            sold_to_team_id: null,
+            sold_price: null,
+          })
+          .eq("id", validated.playerId);
+
+        if (createdLogId) {
+          await supabaseAdmin
+            .from("auction_log")
+            .delete()
+            .eq("id", createdLogId);
+        }
+
+        throw new Error(`Failed to create manual sale audit log: ${auditError.message}`);
+      }
     }
 
     revalidateAuctionViews();

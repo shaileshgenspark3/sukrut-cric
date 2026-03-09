@@ -323,33 +323,33 @@ export async function finalizeSale(
       );
     }
 
-    // 5. Update players table - mark as sold
-    const { error: soldError } = await supabase
-      .from("players")
-      .update({
-        is_sold: true,
-        sold_to_team_id: validated.teamId,
-        sold_price: validated.bidAmount,
-      })
-      .eq("id", validated.playerId);
+    const previousPlayerState = {
+      is_sold: player.is_sold ?? false,
+      sold_to_team_id: player.sold_to_team_id ?? null,
+      sold_price: player.sold_price ?? null,
+    };
+    const previousAuctionState = {
+      current_player_id: auctionState.current_player_id,
+      current_base_price: auctionState.current_base_price,
+      current_bid_amount: auctionState.current_bid_amount,
+      current_bid: auctionState.current_bid,
+      bid_count: auctionState.bid_count,
+      status: auctionState.status,
+      current_bidder_team_id: auctionState.current_bidder_team_id,
+      timer_end: auctionState.timer_end,
+      is_paused: auctionState.is_paused,
+      paused_at: auctionState.paused_at,
+      last_bid_at: auctionState.last_bid_at,
+      updated_at: auctionState.updated_at,
+    };
+    const nextPurse = rules.current_purse - validated.bidAmount;
 
-    if (soldError) {
-      throw new Error(`Failed to mark player as sold: ${soldError.message}`);
-    }
+    let playerUpdated = false;
+    let purseUpdated = false;
+    let winningBidMarked = false;
+    let auctionStateReset = false;
 
-    // 6. Update auction_rules table - deduct from team purse
-    const { error: purseError } = await supabase
-      .from("auction_rules")
-      .update({
-        current_purse: rules.current_purse - validated.bidAmount,
-      })
-      .eq("team_id", validated.teamId);
-
-    if (purseError) {
-      throw new Error(`Failed to update team purse: ${purseError.message}`);
-    }
-
-    // 7. Mark the winning bid in bids table
+    // 5. Find the winning bid row before mutating anything else
     const { data: highestBid } = await supabase
       .from("bids")
       .select("id")
@@ -358,44 +358,118 @@ export async function finalizeSale(
       .eq("auction_round", auctionState.auction_round || 0)
       .order("bid_amount", { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    if (highestBid) {
-      await supabase
-        .from("bids")
-        .update({ is_winning_bid: true })
-        .eq("id", highestBid.id);
+    try {
+      // 6. Update players table - mark as sold
+      const { error: soldError } = await supabase
+        .from("players")
+        .update({
+          is_sold: true,
+          sold_to_team_id: validated.teamId,
+          sold_price: validated.bidAmount,
+        })
+        .eq("id", validated.playerId);
+
+      if (soldError) {
+        throw new Error(`Failed to mark player as sold: ${soldError.message}`);
+      }
+      playerUpdated = true;
+
+      // 7. Update auction_rules table - deduct from team purse
+      const { error: purseError } = await supabase
+        .from("auction_rules")
+        .update({
+          current_purse: nextPurse,
+        })
+        .eq("team_id", validated.teamId);
+
+      if (purseError) {
+        throw new Error(`Failed to update team purse: ${purseError.message}`);
+      }
+      purseUpdated = true;
+
+      // 8. Mark the winning bid in bids table
+      if (highestBid?.id) {
+        const { error: winningBidError } = await supabase
+          .from("bids")
+          .update({ is_winning_bid: true })
+          .eq("id", highestBid.id);
+
+        if (winningBidError) {
+          throw new Error(`Failed to mark winning bid: ${winningBidError.message}`);
+        }
+        winningBidMarked = true;
+      }
+
+      // 9. Reset auction_state to idle
+      const { error: resetError } = await supabase
+        .from("auction_state")
+        .update({
+          current_player_id: null,
+          current_base_price: null,
+          current_bid_amount: null,
+          current_bid: 0,
+          bid_count: 0,
+          status: "idle",
+          current_bidder_team_id: null,
+          timer_end: null,
+          is_paused: false,
+          paused_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", auctionState.id);
+
+      if (resetError) {
+        throw new Error(`Failed to reset auction state: ${resetError.message}`);
+      }
+      auctionStateReset = true;
+
+      // 10. Create auction_log entry
+      const logResult = await createLogEntry(validated.playerId, validated.teamId, "sold", validated.bidAmount, false);
+      if (!logResult.success) {
+        throw new Error(logResult.message);
+      }
+    } catch (error) {
+      if (auctionStateReset) {
+        await supabase
+          .from("auction_state")
+          .update(previousAuctionState)
+          .eq("id", auctionState.id);
+      }
+
+      if (winningBidMarked && highestBid?.id) {
+        await supabase
+          .from("bids")
+          .update({ is_winning_bid: false })
+          .eq("id", highestBid.id);
+      }
+
+      if (purseUpdated) {
+        await supabase
+          .from("auction_rules")
+          .update({ current_purse: rules.current_purse })
+          .eq("team_id", validated.teamId);
+      }
+
+      if (playerUpdated) {
+        await supabase
+          .from("players")
+          .update(previousPlayerState)
+          .eq("id", validated.playerId);
+      }
+
+      throw error;
     }
 
-    // 8. Reset auction_state to idle
-    const { error: resetError } = await supabase
-      .from("auction_state")
-      .update({
-        current_player_id: null,
-        current_base_price: null,
-        current_bid_amount: null,
-        current_bid: 0,
-        bid_count: 0,
-        status: "idle",
-        current_bidder_team_id: null,
-        timer_end: null,
-        is_paused: false,
-        paused_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", auctionState.id);
-
-    if (resetError) {
-      throw new Error(`Failed to reset auction state: ${resetError.message}`);
+    // 11. Clear bans for this player
+    try {
+      await clearBansForPlayer(validated.playerId);
+    } catch (banError) {
+      console.error("Warning: Failed to clear bans for player after sale:", banError);
     }
 
-    // 9. Create auction_log entry
-    await createLogEntry(validated.playerId, validated.teamId, "sold", validated.bidAmount, false);
-
-    // 10. Clear bans for this player
-    await clearBansForPlayer(validated.playerId);
-
-    // 11. Revalidate admin and captain pages
+    // 12. Revalidate admin and captain pages
     revalidateAuctionViews();
 
     return {

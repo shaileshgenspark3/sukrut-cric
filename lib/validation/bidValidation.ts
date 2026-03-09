@@ -28,7 +28,7 @@ export interface CategoryBasePrices {
 export async function getCategoryBasePrices(): Promise<CategoryBasePrices> {
   const { data: settings, error } = await supabase
     .from("tournament_settings")
-    .select("base_price_A_plus, base_price_A, base_price_B, base_price_F")
+    .select("base_price_a_plus, base_price_a, base_price_b, base_price_f")
     .single();
 
   if (error || !settings) {
@@ -41,10 +41,10 @@ export async function getCategoryBasePrices(): Promise<CategoryBasePrices> {
   }
 
   return {
-    "A+": settings.base_price_A_plus || 500000,
-    A: settings.base_price_A || 200000,
-    B: settings.base_price_B || 100000,
-    F: settings.base_price_F || 50000,
+    "A+": settings.base_price_a_plus || 500000,
+    A: settings.base_price_a || 200000,
+    B: settings.base_price_b || 100000,
+    F: settings.base_price_f || 50000,
   };
 }
 
@@ -62,7 +62,8 @@ export async function getRosterStatus(teamId: string): Promise<RosterStatus> {
     .from("players")
     .select("gender, category, sold_price")
     .eq("sold_to_team_id", teamId)
-    .eq("is_sold", true);
+    .eq("is_sold", true)
+    .eq("is_captain", false);
 
   if (!roster) {
     return {
@@ -109,7 +110,6 @@ export async function getRosterStatus(teamId: string): Promise<RosterStatus> {
 
 export async function calculateMaxBid(
   teamId: string,
-  playerCategory: string,
   playerGender: string
 ): Promise<number> {
   const { data: rules } = await supabase
@@ -125,22 +125,30 @@ export async function calculateMaxBid(
   const currentPurse = rules.current_purse || 0;
   const roster = await getRosterStatus(teamId);
   const basePrices = await getCategoryBasePrices();
+  const nextMaleCount = roster.male + (playerGender === "Male" ? 1 : 0);
+  const nextFemaleCount = roster.female + (playerGender === "Female" ? 1 : 0);
+  const nextTotalCount = roster.total + 1;
 
-  const playerBasePrice = basePrices[playerCategory as keyof CategoryBasePrices] || 0;
-
-  let requiredPurseForUnfilled = 0;
-
-  if (playerGender === "Male") {
-    const availableMaleSlots = Math.max(0, roster.availableMaleSlots - 1);
-    requiredPurseForUnfilled += availableMaleSlots * basePrices.B;
-  } else {
-    const availableFemaleSlots = Math.max(0, roster.availableFemaleSlots - 1);
-    requiredPurseForUnfilled += availableFemaleSlots * basePrices.F;
+  if (nextMaleCount > roster.maxMale || nextFemaleCount > roster.maxFemale || nextTotalCount > roster.maxTotal) {
+    return 0;
   }
 
-  const maxBid = currentPurse - requiredPurseForUnfilled + playerBasePrice;
+  const remainingTotalSlots = Math.max(0, roster.maxTotal - nextTotalCount);
+  const remainingMaleSlots = Math.max(0, roster.maxMale - nextMaleCount);
+  const remainingFemaleSlots = Math.max(0, roster.maxFemale - nextFemaleCount);
 
-  return Math.max(0, maxBid);
+  const reserveFemaleSlots = Math.min(remainingFemaleSlots, remainingTotalSlots);
+  const reserveMaleSlots = Math.max(0, remainingTotalSlots - reserveFemaleSlots);
+
+  if (reserveMaleSlots > remainingMaleSlots) {
+    return 0;
+  }
+
+  const requiredPurseForRemainingSlots =
+    reserveMaleSlots * basePrices.B +
+    reserveFemaleSlots * basePrices.F;
+
+  return Math.max(0, currentPurse - requiredPurseForRemainingSlots);
 }
 
 export async function validateBid(
@@ -176,7 +184,7 @@ export async function validateBid(
     };
   }
 
-  const maxBid = await calculateMaxBid(teamId, player.category, player.gender);
+  const maxBid = await calculateMaxBid(teamId, player.gender);
 
   if (bidAmount > maxBid) {
     return {
@@ -220,7 +228,7 @@ export async function getTeamEligibility(
   }
 
   const roster = await getRosterStatus(teamId);
-  const maxBid = await calculateMaxBid(teamId, player.category, player.gender);
+  const maxBid = await calculateMaxBid(teamId, player.gender);
 
   if (player.gender === "Male" && roster.male >= roster.maxMale) {
     reasons.push(`Maximum male players (${roster.maxMale}) reached`);

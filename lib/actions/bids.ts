@@ -158,7 +158,7 @@ export async function getTeamBidEligibility(teamId: string, playerId: string) {
     };
   }
 
-  const maxBid = await calculateMaxBid(teamId, player.category, player.gender);
+  const maxBid = await calculateMaxBid(teamId, player.gender);
   const nextBid = getNextAuctionBidAmount(auctionState);
 
   const reasons: string[] = [];
