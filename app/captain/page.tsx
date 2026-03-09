@@ -176,9 +176,10 @@ export default function CaptainDashboard() {
     );
 
     // Max bid calculation for current player
-    const [maxBid, setMaxBid] = useState(0);
+    const [maxBid, setMaxBid] = useState<number | null>(null);
     const [bidEligibility, setBidEligibility] = useState<{ canBid: boolean; reasons: string[] }>({ canBid: true, reasons: [] });
     const [categoryEligibility, setCategoryEligibility] = useState<{ eligible: boolean; reason?: string }>({ eligible: true });
+    const [isEligibilityLoading, setIsEligibilityLoading] = useState(false);
     const [maxBidNoteDismissedForPlayerId, setMaxBidNoteDismissedForPlayerId] = useState<string | null>(null);
     const [pauseSponsorDismissedForPlayerId, setPauseSponsorDismissedForPlayerId] = useState<string | null>(null);
     const [dismissedSponsorTriggerKey, setDismissedSponsorTriggerKey] = useState<string | null>(null);
@@ -188,16 +189,27 @@ export default function CaptainDashboard() {
     const isPauseSponsorDismissed = !!currentPlayerId && pauseSponsorDismissedForPlayerId === currentPlayerId;
 
     useEffect(() => {
+        let isActive = true;
+
         const fetchMaxBid = async () => {
             if (!team?.id || !auctionState?.current_player?.id) {
-                setMaxBid(0);
+                if (!isActive) return;
+                setIsEligibilityLoading(false);
+                setMaxBid(null);
                 setBidEligibility({ canBid: true, reasons: [] });
                 setCategoryEligibility({ eligible: true });
                 return;
             }
 
             try {
+                if (!isActive) return;
+                setIsEligibilityLoading(true);
+                setMaxBid(null);
+                setBidEligibility({ canBid: true, reasons: [] });
+                setCategoryEligibility({ eligible: true });
+
                 const eligibility = await getTeamEligibility(team.id, auctionState.current_player.id);
+                if (!isActive) return;
                 setMaxBid(eligibility.maxBid);
                 setBidEligibility({ canBid: eligibility.canBid, reasons: eligibility.reasons });
 
@@ -206,16 +218,26 @@ export default function CaptainDashboard() {
                     auctionState.current_player.category,
                     auctionState.current_player.gender
                 );
+                if (!isActive) return;
                 setCategoryEligibility(categoryCheck);
             } catch (error) {
                 console.error("Failed to calculate max bid:", error);
-                setMaxBid(0);
+                if (!isActive) return;
+                setMaxBid(null);
                 setBidEligibility({ canBid: false, reasons: ["Failed to calculate max bid"] });
                 setCategoryEligibility({ eligible: true });
+            } finally {
+                if (isActive) {
+                    setIsEligibilityLoading(false);
+                }
             }
         };
 
         fetchMaxBid();
+
+        return () => {
+            isActive = false;
+        };
     }, [team?.id, auctionState?.current_player?.id, auctionState?.current_bid_amount]);
 
     useEffect(() => {
@@ -275,12 +297,15 @@ export default function CaptainDashboard() {
     if (!isAuctionLive) bidDisabledReason = 'Auction is paused';
     else if (!isPlayerOnBlock) bidDisabledReason = 'Waiting for player';
     else if (isHighestBidder) bidDisabledReason = 'You are the highest bidder!';
+    else if (isEligibilityLoading) bidDisabledReason = 'Syncing live bid access...';
     else if (!categoryEligibility.eligible) bidDisabledReason = categoryEligibility.reason || 'Category limit reached';
-    else if (nextBid > maxBid) bidDisabledReason = `Max bid is ₹${maxBid.toLocaleString()}`;
+    else if (maxBid !== null && nextBid > maxBid) bidDisabledReason = `Max bid is ₹${maxBid.toLocaleString()}`;
     else if (!bidEligibility.canBid && bidEligibility.reasons.length > 0) bidDisabledReason = bidEligibility.reasons[0];
     else if (availableTokens < nextBid) bidDisabledReason = 'Insufficient tokens';
     else if (playerGender === 'Male' && maleCount >= maxMale) bidDisabledReason = 'Max male players reached';
     else if (playerGender === 'Female' && femaleCount >= maxFemale) bidDisabledReason = 'Max female players reached';
+
+    const showBidAccessLoading = isPlayerOnBlock && isEligibilityLoading;
 
     const bidMutation = useMutation({
         mutationFn: async () => {
@@ -320,8 +345,12 @@ export default function CaptainDashboard() {
 
     if (!userId || !team) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
+            <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background text-center">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <div className="space-y-1">
+                    <p className="text-lg font-display font-black tracking-wide text-white uppercase">Loading captain console...</p>
+                    <p className="text-sm text-slate-400">Checking session and syncing live auction data.</p>
+                </div>
             </div>
         );
     }
@@ -338,8 +367,8 @@ export default function CaptainDashboard() {
                         <div>
                             <h1 className="font-display font-black text-2xl md:text-3xl text-white tracking-tighter leading-tight">{team.team_name.toUpperCase()}</h1>
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md font-black tracking-widest uppercase">CAPTAIN</span>
-                                <span className="text-slate-500 text-xs font-medium font-sans">{team.captain_name}</span>
+                                <span className="text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md font-black tracking-widest uppercase">CAPTAIN</span>
+                                <span className="text-slate-300 text-sm font-medium font-sans">{team.captain_name}</span>
                             </div>
                         </div>
                     </div>
@@ -348,7 +377,7 @@ export default function CaptainDashboard() {
                         {isAuctionLive && (
                             <div className="flex bg-destructive/10 border border-destructive/20 text-destructive px-5 py-2 rounded-2xl items-center gap-3 shadow-[0_0_20px_rgba(239,68,68,0.15)]">
                                 <div className="w-2 h-2 rounded-full bg-destructive animate-ping" />
-                                <span className="font-display font-black text-[10px] tracking-[0.2em]">BROADCAST LIVE</span>
+                                <span className="font-display font-black text-xs tracking-[0.2em]">BROADCAST LIVE</span>
                             </div>
                         )}
                         <button
@@ -371,7 +400,7 @@ export default function CaptainDashboard() {
                             <div className="relative z-10">
                                 <div className="flex justify-between items-start mb-12">
                                     <div className="space-y-1">
-                                        <p className="text-gold flex items-center gap-2 text-[10px] uppercase tracking-[0.4em] font-black opacity-60">
+                                        <p className="text-gold flex items-center gap-2 text-xs uppercase tracking-[0.35em] font-black opacity-70">
                                             <Flame className="w-4 h-4" /> Operational Fuel
                                         </p>
                                         <h2 className="text-6xl md:text-8xl font-display font-black text-white tracking-tighter glow-gold-lg">
@@ -394,7 +423,7 @@ export default function CaptainDashboard() {
                                             className="h-full bg-gradient-to-r from-gold to-yellow-600 shadow-[0_0_20px_rgba(255,215,0,0.3)]"
                                         />
                                     </div>
-                                    <div className="flex justify-between text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase">
+                                    <div className="flex justify-between text-xs font-black text-slate-400 tracking-[0.2em] uppercase">
                                         <span>Exhausted</span>
                                         <span>Full Capacity</span>
                                     </div>
@@ -410,15 +439,15 @@ export default function CaptainDashboard() {
                                         className="relative z-10 mt-10 pt-8 border-t border-white/5 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden"
                                     >
                                         <div className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl">
-                                            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Global Allocation</p>
+                                            <p className="text-xs text-slate-300 font-black uppercase tracking-widest mb-1">Global Allocation</p>
                                             <p className="text-xl font-display font-black text-white tracking-widest">₹{basePurse.toLocaleString()}</p>
                                         </div>
                                         <div className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl">
-                                            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Officer Tax</p>
+                                            <p className="text-xs text-slate-300 font-black uppercase tracking-widest mb-1">Officer Tax</p>
                                             <p className="text-xl font-display font-black text-destructive tracking-widest">-₹{captainDeduction.toLocaleString()}</p>
                                         </div>
                                         <div className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl">
-                                            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Deployment Cost</p>
+                                            <p className="text-xs text-slate-300 font-black uppercase tracking-widest mb-1">Deployment Cost</p>
                                             <p className="text-xl font-display font-black text-destructive tracking-widest">-₹{totalSpent.toLocaleString()}</p>
                                         </div>
                                     </motion.div>
@@ -432,7 +461,7 @@ export default function CaptainDashboard() {
                         <div className="glass-card bg-slate-950/40 border border-blue-500/20 rounded-[2.5rem] p-8 flex-1 flex flex-col justify-between relative group overflow-hidden">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-[60px]" />
                             <div className="flex items-center justify-between mb-2 relative z-10">
-                                <p className="text-blue-400 text-[10px] uppercase tracking-[0.3em] font-black">Infantry Cells</p>
+                                <p className="text-blue-300 text-xs uppercase tracking-[0.28em] font-black">Infantry Cells</p>
                                 <div className="p-3 bg-blue-500/10 rounded-2xl border border-blue-500/20 text-blue-500">
                                     <Users className="w-5 h-5" />
                                 </div>
@@ -452,7 +481,7 @@ export default function CaptainDashboard() {
                         <div className="glass-card bg-slate-950/40 border border-pink-500/20 rounded-[2.5rem] p-8 flex-1 flex flex-col justify-between relative group overflow-hidden">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-pink-500/5 blur-[60px]" />
                             <div className="flex items-center justify-between mb-2 relative z-10">
-                                <p className="text-pink-400 text-[10px] uppercase tracking-[0.3em] font-black">Spec Ops Matrix</p>
+                                <p className="text-pink-300 text-xs uppercase tracking-[0.28em] font-black">Spec Ops Matrix</p>
                                 <div className="p-3 bg-pink-500/10 rounded-2xl border border-pink-500/20 text-pink-500">
                                     <Users className="w-5 h-5" />
                                 </div>
@@ -484,10 +513,13 @@ export default function CaptainDashboard() {
                                 <div className="p-8 bg-slate-900 rounded-full border border-white/5 mb-8 group-hover:scale-110 transition-transform duration-700">
                                     <Target className="w-16 h-16 text-slate-700 animate-pulse" />
                                 </div>
-                                <h2 className="text-4xl font-display font-black text-white mb-4 tracking-tighter uppercase tracking-[0.1em]">Target Identification...</h2>
-                                <p className="text-slate-500 max-w-lg font-sans font-medium leading-relaxed">
-                                    The auction floor is currently silent. Stand by for the next high-value asset to be deployed to the block.
-                                    Synchronizing with command center...
+                                <h2 className="text-4xl font-display font-black text-white mb-4 tracking-tighter uppercase tracking-[0.1em]">
+                                    {!isAuctionLive ? 'Auction Paused' : 'Waiting for Next Player'}
+                                </h2>
+                                <p className="text-slate-300 max-w-lg font-sans font-medium leading-relaxed">
+                                    {!isAuctionLive
+                                        ? 'Bidding is temporarily paused. Stay ready — the command center will resume the auction shortly.'
+                                        : 'The auction floor is ready. Stand by for the next player to be deployed to the live block.'}
                                 </p>
                             </motion.div>
                         ) : (
@@ -514,25 +546,25 @@ export default function CaptainDashboard() {
                                     </h2>
 
                                     <div className="flex flex-wrap justify-center gap-3 mb-8">
-                                        <span className="glass bg-white/5 border-white/10 text-slate-300 text-[10px] font-black px-4 py-2 rounded-xl uppercase tracking-widest">{auctionState.current_player?.playing_role}</span>
-                                        <span className="glass bg-white/5 border-white/10 text-slate-300 text-[10px] font-black px-4 py-2 rounded-xl uppercase tracking-widest">{auctionState.current_player?.gender.toUpperCase()} UNIT</span>
+                                        <span className="glass bg-white/5 border-white/10 text-slate-200 text-xs font-black px-4 py-2 rounded-xl uppercase tracking-widest">{auctionState.current_player?.playing_role}</span>
+                                        <span className="glass bg-white/5 border-white/10 text-slate-200 text-xs font-black px-4 py-2 rounded-xl uppercase tracking-widest">{auctionState.current_player?.gender.toUpperCase()} UNIT</span>
                                     </div>
 
-                                    <div className="flex items-center gap-3 text-slate-500">
+                                    <div className="flex items-center gap-3 text-slate-300">
                                         <div className="h-px w-8 bg-white/5" />
-                                        <p className="uppercase text-[10px] tracking-[0.4em] font-black">Base Value: ₹{auctionState.current_player?.base_price.toLocaleString()}</p>
+                                        <p className="uppercase text-xs tracking-[0.35em] font-black">Base Value: ₹{auctionState.current_player?.base_price.toLocaleString()}</p>
                                         <div className="h-px w-8 bg-white/5" />
                                     </div>
 
                                     {settings?.sponsor_image_url && isPaused && isPlayerOnBlock && !isPauseSponsorDismissed && (
                                         <div className="mt-6 w-full max-w-md bg-slate-950/70 border border-gold/20 rounded-2xl p-4">
                                             <div className="flex items-center justify-between mb-3">
-                                                <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gold">Sponsor</p>
+                                                <p className="text-xs uppercase tracking-[0.3em] font-black text-gold">Sponsor</p>
                                                 <button
                                                     onClick={() => {
                                                         if (currentPlayerId) setPauseSponsorDismissedForPlayerId(currentPlayerId);
                                                     }}
-                                                    className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-400 hover:text-white transition-colors"
+                                                    className="text-xs uppercase tracking-[0.2em] font-black text-slate-300 hover:text-white transition-colors"
                                                 >
                                                     Cancel
                                                 </button>
@@ -567,7 +599,7 @@ export default function CaptainDashboard() {
                                                     </span>
                                                 </div>
                                             )}
-                                            <p className="text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black mb-1">
+                                            <p className="text-xs text-slate-300 uppercase tracking-[0.3em] font-black mb-1">
                                                 {isPaused ? 'Timer Frozen At' : isRunning ? 'Time Remaining' : 'Timer Stopped'}
                                             </p>
                                             <div className={`font-display font-black tracking-tighter ${
@@ -582,7 +614,7 @@ export default function CaptainDashboard() {
 
                                     <div className="bg-slate-950/60 border border-white/5 rounded-[2.5rem] p-10 mb-10 text-center relative overflow-hidden group/bid">
                                         <div className="absolute inset-0 bg-gold/5 opacity-0 group-hover/bid:opacity-100 transition-opacity duration-700" />
-                                        <p className="text-slate-500 text-[10px] uppercase font-black tracking-[0.4em] mb-4">Current Valuation</p>
+                                        <p className="text-slate-300 text-xs uppercase font-black tracking-[0.35em] mb-4">Current Valuation</p>
                                         <motion.p
                                             key={currentBid}
                                             initial={{ scale: 0.9, opacity: 0 }}
@@ -599,7 +631,7 @@ export default function CaptainDashboard() {
                                                     {isHighestBidder ? 'SECTOR SECURED BY YOU' : `CLAIMED BY: ${auctionState.current_bidder.team_name.toUpperCase()}`}
                                                 </div>
                                             ) : (
-                                                <p className="text-slate-600 text-[10px] font-black uppercase tracking-[0.3em]">Sector Open for Entries</p>
+                                                <p className="text-slate-400 text-xs font-black uppercase tracking-[0.3em]">Sector Open for Entries</p>
                                             )}
                                         </div>
                                     </div>
@@ -616,12 +648,20 @@ export default function CaptainDashboard() {
                                     >
                                         <div className="relative z-10 flex flex-col items-center">
                                             {bidMutation.isPending ? (
-                                                <span className="flex items-center justify-center gap-4"><Loader2 className="w-10 h-10 animate-spin" /> ENGAGING...</span>
+                                                <>
+                                                    <span className="flex items-center justify-center gap-4 text-xl md:text-2xl"><Loader2 className="w-8 h-8 animate-spin" /> Placing bid...</span>
+                                                    <span className="mt-2 text-xs tracking-[0.25em] uppercase opacity-70">Please wait — live bid is being submitted</span>
+                                                </>
+                                            ) : showBidAccessLoading ? (
+                                                <>
+                                                    <span className="flex items-center justify-center gap-4 text-base md:text-lg tracking-[0.2em] font-black uppercase"><Loader2 className="w-6 h-6 animate-spin" /> Syncing live bid access...</span>
+                                                    <span className="mt-2 text-xs tracking-[0.25em] uppercase opacity-60">Checking purse, limits, and live eligibility</span>
+                                                </>
                                             ) : bidDisabledReason ? (
                                                 <span className="flex items-center justify-center gap-4 text-sm md:text-base tracking-[0.3em] font-black"><AlertCircle className="w-6 h-6" /> {bidDisabledReason.toUpperCase()}</span>
                                             ) : (
                                                 <>
-                                                    <span className="text-[10px] tracking-[0.5em] mb-1 opacity-60">AUTHORIZE NEXT ENTRY</span>
+                                                    <span className="text-xs tracking-[0.45em] mb-1 opacity-70">AUTHORIZE NEXT ENTRY</span>
                                                     <span className="flex items-center gap-4">BID ₹{nextBid.toLocaleString()} <Zap className="w-8 h-8 fill-black" /></span>
                                                 </>
                                             )}
@@ -639,9 +679,9 @@ export default function CaptainDashboard() {
                                     )}
 
                                     {/* Max Bid Display */}
-                                    {isPlayerOnBlock && maxBid > 0 && soldPlayerCount > 85 && (
+                                    {isPlayerOnBlock && maxBid !== null && maxBid > 0 && soldPlayerCount > 85 && (
                                         <div className={`mt-4 p-4 rounded-2xl text-center ${nextBid > maxBid ? 'bg-destructive/10 border border-destructive/30' : 'bg-primary/10 border border-primary/30'}`}>
-                                            <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400 mb-1">Your Maximum Bid</p>
+                                            <p className="text-xs uppercase tracking-[0.3em] text-slate-300 mb-1">Your Maximum Bid</p>
                                             <p className={`font-display font-black text-2xl ${nextBid > maxBid ? 'text-destructive' : 'text-primary'}`}>
                                                 ₹{maxBid.toLocaleString()}
                                             </p>
@@ -660,7 +700,7 @@ export default function CaptainDashboard() {
                                                         onClick={() => {
                                                             if (currentPlayerId) setMaxBidNoteDismissedForPlayerId(currentPlayerId);
                                                         }}
-                                                        className="mt-2 text-[10px] uppercase tracking-[0.2em] font-black text-slate-400 hover:text-white transition-colors"
+                                                        className="mt-2 text-xs uppercase tracking-[0.2em] font-black text-slate-300 hover:text-white transition-colors"
                                                     >
                                                         Cancel
                                                     </button>
@@ -674,7 +714,7 @@ export default function CaptainDashboard() {
                                         <div className="mt-4 p-4 rounded-2xl bg-destructive/10 border border-destructive/30 text-center">
                                             <div className="flex items-center justify-center gap-2 mb-2">
                                                 <AlertCircle className="w-5 h-5 text-destructive" />
-                                                <p className="text-[10px] uppercase tracking-[0.3em] text-destructive font-black">
+                                                <p className="text-xs uppercase tracking-[0.3em] text-destructive font-black">
                                                     Category Limit Reached
                                                 </p>
                                             </div>
@@ -714,7 +754,8 @@ export default function CaptainDashboard() {
                                 <div className="w-20 h-20 rounded-full bg-white/[0.02] border border-white/5 flex items-center justify-center mb-6">
                                     <Users className="w-10 h-10 text-slate-800" />
                                 </div>
-                                <p className="text-slate-500 font-display font-black tracking-[0.2em] uppercase">No Assets Acquired</p>
+                                <p className="text-slate-300 font-display font-black tracking-[0.2em] uppercase">No Assets Acquired</p>
+                                <p className="mt-2 text-sm text-slate-400">Your roster will appear here after successful bids are finalized.</p>
                             </div>
                         ) : (
                             <div className="divide-y divide-white/5">
@@ -728,16 +769,16 @@ export default function CaptainDashboard() {
                                             <div>
                                                 <p className="font-display font-black text-white text-xl tracking-widest group-hover:text-primary transition-colors uppercase">{player.name}</p>
                                                 <div className="flex items-center gap-3 mt-1">
-                                                    <span className={`text-[10px] font-black tracking-widest uppercase ${player.gender === 'Male' ? 'text-blue-400' : 'text-pink-400'}`}>{player.gender} UNIT</span>
+                                                    <span className={`text-xs font-black tracking-widest uppercase ${player.gender === 'Male' ? 'text-blue-300' : 'text-pink-300'}`}>{player.gender} UNIT</span>
                                                     <div className="w-1 h-1 rounded-full bg-slate-700" />
-                                                    <span className="text-[10px] text-slate-500 font-black tracking-widest uppercase">{player.playing_role}</span>
+                                                    <span className="text-xs text-slate-300 font-black tracking-widest uppercase">{player.playing_role}</span>
                                                     <div className="w-1 h-1 rounded-full bg-slate-700" />
-                                                    <span className="text-[10px] text-gold font-black tracking-widest uppercase">{player.category} TIER</span>
+                                                    <span className="text-xs text-gold font-black tracking-widest uppercase">{player.category} TIER</span>
                                                 </div>
                                             </div>
                                         </div>
                                         <div className="text-right group-hover:scale-110 transition-transform duration-500">
-                                            <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest mb-1">Acquisition Cost</p>
+                                            <p className="text-xs text-slate-300 font-black uppercase tracking-widest mb-1">Acquisition Cost</p>
                                             <p className="font-display font-black text-3xl text-white tracking-tighter">₹{player.sold_price?.toLocaleString()}</p>
                                         </div>
                                     </div>
@@ -758,12 +799,12 @@ export default function CaptainDashboard() {
                         className="fixed bottom-6 right-6 z-[95] w-[360px] bg-slate-950/95 border border-gold/30 rounded-3xl p-5 shadow-[0_20px_70px_rgba(0,0,0,0.65)]"
                     >
                         <div className="flex items-center justify-between mb-4">
-                            <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gold">
+                            <p className="text-xs uppercase tracking-[0.28em] font-black text-gold">
                                 {sponsorTriggerStatus === 'sold' ? 'Sold Trigger' : 'Unsold Trigger'}
                             </p>
                             <button
                                 onClick={() => setDismissedSponsorTriggerKey(sponsorTriggerKey)}
-                                className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-400 hover:text-white transition-colors"
+                                className="text-xs uppercase tracking-[0.2em] font-black text-slate-300 hover:text-white transition-colors"
                             >
                                 Cancel
                             </button>
@@ -787,7 +828,7 @@ export default function CaptainDashboard() {
                                 <p className="text-white font-display font-black tracking-wide uppercase truncate">
                                     {sponsorTriggerPlayer.name}
                                 </p>
-                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">
+                                <p className="text-xs text-slate-300 font-black uppercase tracking-[0.18em]">
                                     {sponsorTriggerPlayer.category} Tier • {sponsorTriggerPlayer.playing_role}
                                 </p>
                                 {sponsorTriggerStatus === 'sold' && sponsorTriggerBidAmount && (
@@ -846,11 +887,11 @@ export default function CaptainDashboard() {
 
                             <div className="glass-card bg-white/5 border border-white/10 px-12 py-6 rounded-[2rem] inline-flex items-center gap-6">
                                 <div className="text-left border-r border-white/10 pr-6">
-                                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Asset Grade</p>
+                                    <p className="text-xs text-slate-300 font-black uppercase tracking-widest mb-1">Asset Grade</p>
                                     <p className="text-2xl font-display font-black text-white">{auctionState?.current_player?.category} TIER</p>
                                 </div>
                                 <div className="text-left">
-                                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Acquisition Cost</p>
+                                    <p className="text-xs text-slate-300 font-black uppercase tracking-widest mb-1">Acquisition Cost</p>
                                     <p className="text-2xl font-display font-black text-white">₹{currentBid.toLocaleString()}</p>
                                 </div>
                             </div>
@@ -858,7 +899,7 @@ export default function CaptainDashboard() {
 
                         <button
                             onClick={() => setShowVictory(false)}
-                            className="absolute bottom-12 text-slate-500 hover:text-white font-black text-[10px] tracking-[0.4em] uppercase transition-colors"
+                            className="absolute bottom-12 text-slate-300 hover:text-white font-black text-xs tracking-[0.35em] uppercase transition-colors"
                         >
                             CLICK TO DISMISS
                         </button>

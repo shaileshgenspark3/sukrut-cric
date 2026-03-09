@@ -160,7 +160,15 @@ export default function AdminDashboard() {
         setShowManualSale
     };
 
-    if (!userId) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+    if (!userId) return (
+        <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <div className="space-y-1">
+                <p className="text-lg font-display font-black tracking-wide text-white uppercase">Loading admin console...</p>
+                <p className="text-sm text-slate-400">Checking session and syncing live auction data.</p>
+            </div>
+        </div>
+    );
 
     return (
         <div className="min-h-screen bg-background mesh-gradient flex flex-col md:flex-row">
@@ -176,18 +184,18 @@ export default function AdminDashboard() {
                     {isCoreAdmin ? (
                         <div className="flex items-center gap-2 mt-4 bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-1.5 w-fit">
                             <Activity className="w-3 h-3 text-destructive animate-pulse" />
-                            <span className="text-destructive text-[10px] uppercase tracking-[0.2em] font-black">CORE ADMIN</span>
+                            <span className="text-destructive text-xs uppercase tracking-[0.18em] font-black">CORE ADMIN</span>
                         </div>
                     ) : (
                         <div className="flex items-center gap-2 mt-4 bg-primary/10 border border-primary/20 rounded-lg px-3 py-1.5 w-fit">
                             <Shield className="w-3 h-3 text-primary" />
-                            <span className="text-primary text-[10px] uppercase tracking-[0.2em] font-black">REGULAR ADMIN</span>
+                            <span className="text-primary text-xs uppercase tracking-[0.18em] font-black">REGULAR ADMIN</span>
                         </div>
                     )}
                 </div>
 
                 <nav className="flex-1 p-6 space-y-2 overflow-y-auto scrollbar-hide">
-                    <p className="text-[10px] font-black text-slate-500 tracking-[0.3em] uppercase mb-4 px-2">Navigation</p>
+                    <p className="text-xs font-black text-slate-400 tracking-[0.28em] uppercase mb-4 px-2">Navigation</p>
                     {tabs.map(tab => {
                         const Icon = tab.icon;
                         const isActive = activeTab === tab.id;
@@ -197,11 +205,11 @@ export default function AdminDashboard() {
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`group w-full flex items-center justify-between gap-3 px-5 py-4 rounded-2xl transition-all duration-300 relative overflow-hidden ${isActive
                                     ? "glass bg-primary/10 border-primary/30 text-white shadow-[0_0_20px_rgba(59,130,246,0.15)]"
-                                    : "text-slate-400 hover:text-white hover:bg-white/5"
+                                    : "text-slate-300 hover:text-white hover:bg-white/5"
                                     }`}
                             >
                                 <div className="flex items-center gap-4 relative z-10 transition-transform group-active:scale-95">
-                                    <Icon className={`w-5 h-5 transition-colors ${isActive ? "text-primary group-hover:rotate-12" : "text-slate-500 group-hover:text-primary"}`} />
+                                    <Icon className={`w-5 h-5 transition-colors ${isActive ? "text-primary group-hover:rotate-12" : "text-slate-400 group-hover:text-primary"}`} />
                                     <span className="font-display font-bold tracking-wider text-sm">{tab.label.toUpperCase()}</span>
                                 </div>
                                 {isActive && <motion.div layoutId="activeTab" className="absolute inset-0 bg-primary/10 z-0" />}
@@ -216,7 +224,7 @@ export default function AdminDashboard() {
                         onClick={handleLogout}
                         className="group w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-slate-400 hover:text-white hover:bg-destructive/10 transition-all border border-transparent hover:border-destructive/20"
                     >
-                        <LogOut className="w-5 h-5 text-slate-500 group-hover:text-destructive group-hover:-translate-x-1 transition-all" />
+                        <LogOut className="w-5 h-5 text-slate-400 group-hover:text-destructive group-hover:-translate-x-1 transition-all" />
                         <span className="font-display font-bold tracking-wider text-sm">EXIT CONSOLE</span>
                     </button>
                 </div>
@@ -1312,7 +1320,7 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                 </div>
                 <div className="glass px-6 py-3 rounded-2xl border-white/5 flex items-center gap-4">
                     <div className="text-right">
-                        <p className="text-[10px] text-slate-500 font-black tracking-widest uppercase">Global Progress</p>
+                        <p className="text-xs text-slate-400 font-black tracking-widest uppercase">Global Progress</p>
                         <p className="text-xl font-display font-black text-white">{soldPlayers} / {totalPlayers}</p>
                     </div>
                     <div className="w-12 h-12 rounded-full border-2 border-primary/20 flex items-center justify-center p-1">
@@ -1340,12 +1348,12 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                      <div className="flex justify-between items-center mb-8">
                          <div>
                              <h3 className="font-display text-2xl font-black text-white mb-1 uppercase tracking-tight">Captain Access Matrix</h3>
-                             <p className="text-slate-500 text-sm font-sans">Active authentication tokens and credentials</p>
+                             <p className="text-slate-400 text-sm font-sans">Active authentication tokens and credentials</p>
                          </div>
                          <div className="flex gap-2">
                              <button
                                  onClick={() => modalProps.setShowManualSale?.(true)}
-                                 className="glass px-4 py-2 rounded-xl text-[10px] font-black tracking-widest text-slate-400 hover:text-white hover:bg-white/5 transition-colors flex items-center gap-2"
+                                 className="glass px-4 py-2 rounded-xl text-xs font-black tracking-[0.18em] text-slate-300 hover:text-white hover:bg-white/5 transition-colors flex items-center gap-2"
                              >
                                  <FilePlus className="w-4 h-4" />
                                  MANUAL SALE
@@ -1356,7 +1364,7 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                     <div className="overflow-x-auto scrollbar-hide max-h-[60vh]">
                         <table className="w-full text-left text-sm whitespace-nowrap">
                             <thead className="sticky top-0 z-20 bg-slate-950/80 backdrop-blur-xl border-b border-white/5">
-                                <tr className="text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase">
+                                <tr className="text-xs font-black text-slate-400 tracking-[0.18em] uppercase">
                                     <th className="px-4 py-4">Actions</th>
                                     <th className="px-4 py-5">Corporate Entity</th>
                                     <th className="px-4 py-5">Commanding Officer</th>
@@ -1394,20 +1402,20 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                                                 <div className="w-10 h-10 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center p-1.5 grayscale group-hover/row:grayscale-0 transition-all">
                                                     <img src={t.team_logo_url} className="w-full h-full object-contain" />
                                                 </div>
-                                                <span className="font-display font-bold text-white tracking-wide">{t.team_name}</span>
+                                                <span className="font-display font-bold text-white tracking-wide text-base">{t.team_name}</span>
                                             </div>
                                         </td>
                                         <td className="px-4 py-6">
                                             <div className="flex items-center gap-3">
                                                 <img src={t.captain_image_url} className="w-8 h-8 rounded-full bg-slate-800 border border-white/10" />
-                                                <span className="font-sans font-medium text-slate-300">{t.captain_name}</span>
+                                                <span className="font-sans font-medium text-slate-200 text-sm">{t.captain_name}</span>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-6 font-mono text-xs text-slate-500 group-hover/row:text-primary transition-colors">{t.captain_email}</td>
+                                        <td className="px-4 py-6 font-mono text-sm text-slate-300 group-hover/row:text-primary transition-colors">{t.captain_email}</td>
                                         <td className="px-4 py-6">
-                                            <span className="bg-slate-900 border border-white/5 px-3 py-1.5 rounded-lg text-gold font-mono font-bold tracking-widest text-xs group-hover/row:border-gold/30 transition-all">{t.captain_password}</span>
+                                            <span className="bg-slate-900 border border-white/5 px-3 py-1.5 rounded-lg text-gold font-mono font-bold tracking-widest text-sm group-hover/row:border-gold/30 transition-all">{t.captain_password}</span>
                                         </td>
-                                         <td className="px-4 py-6 text-right font-sans font-medium text-slate-500 text-xs tracking-tight">{t.phone_number}</td>
+                                         <td className="px-4 py-6 text-right font-sans font-medium text-slate-300 text-sm tracking-tight">{t.phone_number}</td>
                                      </tr>
                                   ))}
                               </tbody>
@@ -1551,13 +1559,13 @@ function StatCard({ title, value, icon: Icon, color, accent, isLive }: any) {
                 {isLive && (
                     <div className="flex items-center gap-2 bg-destructive/10 px-3 py-1 rounded-full">
                         <span className="w-1.5 h-1.5 rounded-full bg-destructive animate-ping" />
-                        <span className="text-[10px] font-black text-destructive uppercase tracking-widest">Active</span>
+                        <span className="text-xs font-black text-destructive uppercase tracking-[0.18em]">Active</span>
                     </div>
                 )}
             </div>
 
             <div>
-                <p className="text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase mb-1">{title}</p>
+                <p className="text-xs font-black text-slate-400 tracking-[0.18em] uppercase mb-1">{title}</p>
                 <motion.p
                     initial={{ scale: 0.9, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
@@ -1831,7 +1839,7 @@ function PlayersTab({ players, ...modalProps }: any) {
                 <div className="overflow-x-auto scrollbar-hide max-h-[60vh]">
                     <table className="w-full text-left text-sm whitespace-nowrap">
                         <thead className="sticky top-0 z-20 bg-slate-950/80 backdrop-blur-xl border-b border-white/5">
-                            <tr className="text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase">
+                            <tr className="text-xs font-black text-slate-400 tracking-[0.18em] uppercase">
                                 <th className="px-2 py-3">Actions</th>
                                 <th className="px-4 py-5">Serial No.</th>
                                 <th className="px-4 py-5">Name</th>
@@ -2183,7 +2191,7 @@ function RulesTab({ rules, settings }: any) {
             <div className="glass-card rounded-[2.5rem] border-white/5 overflow-hidden">
                 <table className="w-full text-left text-sm whitespace-nowrap">
                     <thead className="bg-slate-950/80 backdrop-blur-xl border-b border-white/5">
-                        <tr className="text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase">
+                        <tr className="text-xs font-black text-slate-400 tracking-[0.18em] uppercase">
                             <th className="px-8 py-5">Corporate Unit</th>
                             <th className="px-4 py-5">Commanding Officer</th>
                             <th className="px-4 py-5">Base Resource</th>
