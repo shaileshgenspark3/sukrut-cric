@@ -2425,6 +2425,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         const handleExpiry = (e: Event) => {
             const playerId = auctionState?.current_player_id;
             if (!playerId) return;
+            if (!auctionState?.timer_end) return;
             if (expiryHandledPlayerId === playerId) return;
 
             const hasBids = (auctionState?.bid_count || 0) > 0;
@@ -2446,6 +2447,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
         }
 
         if (totalSeconds === 0 &&
+            !!auctionState?.timer_end &&
             (auctionState?.status === 'bidding' || auctionState?.status === 'waiting_for_first_bid') &&
             expiryHandledPlayerId !== playerId
         ) {
@@ -2454,7 +2456,7 @@ function LiveControllerTab({ auctionState, settings, players, teams }: any) {
             setShowExpiryModal(true);
             setExpiryHandledPlayerId(playerId);
         }
-    }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.bid_count, expiryHandledPlayerId]);
+    }, [totalSeconds, auctionState?.current_player_id, auctionState?.status, auctionState?.bid_count, auctionState?.timer_end, expiryHandledPlayerId]);
 
     const [playerSearch, setPlayerSearch] = useState("");
     const [playerCategoryFilter, setPlayerCategoryFilter] = useState("All");

@@ -118,6 +118,11 @@ export function useTimer(): UseTimerReturn {
 
   // Handle timer expiry
   useEffect(() => {
+    if (!auctionState?.timer_end) {
+      expiryDispatchedRef.current = false;
+      return;
+    }
+
     if (localTimer.totalSeconds === 0 && !expiryDispatchedRef.current) {
       expiryDispatchedRef.current = true;
 
@@ -199,7 +204,7 @@ export function useTimer(): UseTimerReturn {
   );
 
   // Check if timer is expired
-  const isExpired = localTimer.totalSeconds <= 0 && auctionState?.timer_end !== null;
+  const isExpired = !!auctionState?.timer_end && localTimer.totalSeconds <= 0;
 
   return {
     totalSeconds: localTimer.totalSeconds,
