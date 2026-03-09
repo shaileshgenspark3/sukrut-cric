@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { calculateRemainingSeconds, formatTimerDisplay } from "@/lib/services/timer/timerService";
+import { useRealtimeSubscription } from "@/hooks/useRealtime";
 
 interface TimerState {
   timer_end: string | null;
@@ -42,9 +43,11 @@ export function useTimer(): UseTimerReturn {
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const expiryDispatchedRef = useRef(false);
 
+  useRealtimeSubscription("auction_state", ["auction_state", "timer"]);
+
   // Fetch auction state from database
   const { data: auctionState, refetch } = useQuery({
-    queryKey: ["auction_state"],
+    queryKey: ["auction_state", "timer"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("auction_state")
