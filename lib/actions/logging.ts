@@ -99,7 +99,7 @@ export async function getAuctionLogs(
   offset: number = 0
 ): Promise<any[]> {
   try {
-    const { data: logs, error } = await supabase
+    const { data: logs, error } = await supabaseAdmin
       .from("auction_log")
       .select(`
         id,
@@ -116,9 +116,8 @@ export async function getAuctionLogs(
         is_manual,
         deleted,
         deleted_at,
-        player:players(id, name, category, image_url, playing_role),
-        team:teams(id, team_name, team_logo_url),
-        logged_by_user:auth.users(id, email)
+        player:players(id, name, category, age, handy, phone_number, image_url, playing_role),
+        team:teams(id, team_name, team_logo_url)
       `)
       .eq("deleted", false)
       .order("logged_at", { ascending: false })
@@ -142,12 +141,7 @@ export async function deleteLogEntry(
   try {
     const validated = DeleteLogEntrySchema.parse({ logId, reason });
 
-    const { data: currentUser } = await supabase.auth.getUser();
-    if (!currentUser.user) {
-      throw new Error("Not authenticated");
-    }
-
-    const { data: logEntry, error: fetchError } = await supabase
+    const { data: logEntry, error: fetchError } = await supabaseAdmin
       .from("auction_log")
       .select("*")
       .eq("id", validated.logId)
@@ -161,26 +155,18 @@ export async function deleteLogEntry(
       return { success: false, message: "Log entry already deleted" };
     }
 
-    const { data: currentUserEmail } = await supabase
-      .from("auth.users")
-      .select("email")
-      .eq("id", currentUser.user.id)
-      .single();
-
-    await supabase.from("audit_log").insert({
+    await supabaseAdmin.from("audit_log").insert({
       action_type: "delete_log",
       entity_type: "auction_log",
       entity_id: validated.logId,
-      performed_by: currentUser.user.id,
       reason: validated.reason,
       previous_state: logEntry,
     });
 
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from("auction_log")
       .update({
         deleted: true,
-        deleted_by: currentUser.user.id,
         deleted_at: new Date().toISOString(),
         deletion_reason: validated.reason,
       })

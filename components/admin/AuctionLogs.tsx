@@ -120,26 +120,8 @@ export function AuctionLogs() {
   const { data: allLogs } = useQuery({
     queryKey: ['auction_logs'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('auction_log')
-        .select(`
-          id,
-          player_id,
-          team_id,
-          status,
-          sale_price,
-          base_price,
-          bid_count,
-          category,
-          gender,
-          logged_at,
-          is_manual,
-          deleted,
-          deleted_at,
-          player:players(id, name, category, age, handy, phone_number, image_url, playing_role),
-          team:teams(id, team_name, team_logo_url)
-        `)
-        .order('logged_at', { ascending: false });
+      const { getAuctionLogs } = await import('@/lib/actions/logging');
+      const data = await getAuctionLogs(1000, 0);
       const sourceLogs = (data || []) as AuctionLogSourceRow[];
       return sourceLogs.map((log) => ({
         ...log,
@@ -147,6 +129,7 @@ export function AuctionLogs() {
         team: unwrapRelation(log.team),
       }));
     },
+    refetchInterval: 5000,
   });
 
   useEffect(() => {

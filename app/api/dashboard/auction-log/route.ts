@@ -18,5 +18,9 @@ export async function GET() {
     return NextResponse.json({ message: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data || []);
+  return NextResponse.json(data || [], {
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+    },
+  });
 }

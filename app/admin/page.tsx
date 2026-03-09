@@ -1172,9 +1172,27 @@ function ConfirmDeleteModal({ show, onClose, onConfirm, type, name }: any) {
 
 function OverviewTab({ teams, players, settings, ...modalProps }: any) {
     const queryClient = useQueryClient();
+    const { data: overviewLogs = [] } = useQuery({
+        queryKey: ['overview', 'auction_logs'],
+        queryFn: async () => {
+            const { getAuctionLogs } = await import('@/lib/actions/logging');
+            return getAuctionLogs(1000, 0);
+        },
+        refetchInterval: 5000,
+    });
+
+    const latestPlayerStatus = new Map<string, string>();
+    for (const log of overviewLogs || []) {
+        if (log?.player_id && !latestPlayerStatus.has(log.player_id)) {
+            latestPlayerStatus.set(log.player_id, log.status);
+        }
+    }
+
     const soldPlayers = players?.filter((p: any) => p.is_sold).length || 0;
+    const unsoldPlayers = players?.filter((p: any) => !p.is_sold && latestPlayerStatus.get(p.id) === 'unsold').length || 0;
     const totalPlayers = players?.length || 0;
-    const progress = totalPlayers > 0 ? (soldPlayers / totalPlayers) * 100 : 0;
+    const pendingPlayers = Math.max(0, totalPlayers - soldPlayers - unsoldPlayers);
+    const progress = totalPlayers > 0 ? ((soldPlayers + unsoldPlayers) / totalPlayers) * 100 : 0;
 
     // CSV Import/Export handlers for captains
     const captainsFileInputRef = useRef<HTMLInputElement>(null);
@@ -1302,10 +1320,13 @@ function OverviewTab({ teams, players, settings, ...modalProps }: any) {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-6">
                 <StatCard title="Total Teams" value={teams?.length || 0} icon={Users} color="text-blue-500" accent="bg-blue-500" />
                 <StatCard title="Available Pool" value={totalPlayers} icon={Users} color="text-purple-500" accent="bg-purple-500" />
                 <StatCard title="Successfully Sold" value={soldPlayers} icon={CheckCircle} color="text-green-500" accent="bg-green-500" />
+                <StatCard title="Marked Unsold" value={unsoldPlayers} icon={XCircle} color="text-amber-500" accent="bg-amber-500" />
+                <StatCard title="Still Pending" value={pendingPlayers} icon={Activity} color="text-slate-400" accent="bg-slate-400" />
+                <StatCard title="Completion" value={`${progress.toFixed(0)}%`} icon={Activity} color="text-cyan-500" accent="bg-cyan-500" />
                 <StatCard title="Auction Phase" value={settings?.is_auction_live ? "LIVE" : "IDLE"} icon={Activity} color={settings?.is_auction_live ? "text-destructive" : "text-slate-500"} accent={settings?.is_auction_live ? "bg-destructive" : "bg-slate-500"} isLive={settings?.is_auction_live} />
             </div>
 

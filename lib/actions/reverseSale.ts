@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { revalidateAuctionViews } from "@/lib/actions/revalidateAuctionViews";
 
 const ReverseSaleSchema = z.object({
@@ -11,7 +12,7 @@ const ReverseSaleSchema = z.object({
 
 export async function getSaleHistory(playerId: string) {
   const [bidsResult, logsResult] = await Promise.all([
-    supabase
+    supabaseAdmin
       .from("bids")
       .select(`
         id,
@@ -23,7 +24,7 @@ export async function getSaleHistory(playerId: string) {
       `)
       .eq("player_id", playerId)
       .order("created_at", { ascending: true }),
-    supabase
+    supabaseAdmin
       .from("auction_log")
       .select("*")
       .eq("player_id", playerId)
@@ -44,12 +45,7 @@ export async function reverseSale(
   try {
     const validated = ReverseSaleSchema.parse({ logId, reason });
 
-    const { data: currentUser } = await supabase.auth.getUser();
-    if (!currentUser.user) {
-      throw new Error("Not authenticated");
-    }
-
-    const { data: logEntry, error: fetchError } = await supabase
+    const { data: logEntry, error: fetchError } = await supabaseAdmin
       .from("auction_log")
       .select("*")
       .eq("id", validated.logId)
@@ -67,16 +63,15 @@ export async function reverseSale(
       return { success: false, message: "Cannot reverse unsold entries" };
     }
 
-    await supabase.from("audit_log").insert({
+    await supabaseAdmin.from("audit_log").insert({
       action_type: "reverse_sale",
       entity_type: "auction_log",
       entity_id: validated.logId,
-      performed_by: currentUser.user.id,
       reason: validated.reason,
       previous_state: logEntry,
     });
 
-    const { error: playerError } = await supabase
+    const { error: playerError } = await supabaseAdmin
       .from("players")
       .update({
         is_sold: false,
@@ -90,14 +85,14 @@ export async function reverseSale(
     }
 
     if (logEntry.team_id && logEntry.sale_price) {
-      const { data: teamRules } = await supabase
+      const { data: teamRules } = await supabaseAdmin
         .from("auction_rules")
         .select("current_purse")
         .eq("team_id", logEntry.team_id)
         .single();
 
       if (teamRules) {
-        const { error: purseError } = await supabase
+        const { error: purseError } = await supabaseAdmin
           .from("auction_rules")
           .update({
             current_purse: teamRules.current_purse + (logEntry.sale_price || 0),
@@ -113,7 +108,7 @@ export async function reverseSale(
     let saleAuctionRound: number | null = null;
 
     if (logEntry.team_id) {
-      const { data: winningBid } = await supabase
+      const { data: winningBid } = await supabaseAdmin
         .from("bids")
         .select("auction_round")
         .eq("player_id", logEntry.player_id)
@@ -126,7 +121,7 @@ export async function reverseSale(
       saleAuctionRound = winningBid?.auction_round ?? null;
 
       if (saleAuctionRound == null && logEntry.status === "sold") {
-        const { data: latestBidForTeam } = await supabase
+        const { data: latestBidForTeam } = await supabaseAdmin
           .from("bids")
           .select("auction_round")
           .eq("player_id", logEntry.player_id)
@@ -140,7 +135,7 @@ export async function reverseSale(
     }
 
     if (saleAuctionRound != null) {
-      const { error: bidsError } = await supabase
+      const { error: bidsError } = await supabaseAdmin
         .from("bids")
         .delete()
         .eq("player_id", logEntry.player_id)
@@ -151,13 +146,13 @@ export async function reverseSale(
       }
     }
 
-    const { data: stateData, error: stateError } = await supabase
+    const { data: stateData, error: stateError } = await supabaseAdmin
       .from("auction_state")
       .select("*")
       .single();
 
     if (!stateError && stateData && stateData.current_player_id === logEntry.player_id) {
-      await supabase
+      await supabaseAdmin
         .from("auction_state")
         .update({
           current_player_id: null,
@@ -172,11 +167,10 @@ export async function reverseSale(
         .eq("id", stateData.id);
     }
 
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from("auction_log")
       .update({
         deleted: true,
-        deleted_by: currentUser.user.id,
         deleted_at: new Date().toISOString(),
         deletion_reason: validated.reason,
       })

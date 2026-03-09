@@ -128,6 +128,7 @@ export default function LiveAuctionDashboard() {
         current_bidder: relationOne(source.current_bidder),
       };
     },
+    refetchInterval: 5000,
   });
 
   const { data: settings } = useQuery({
@@ -139,6 +140,7 @@ export default function LiveAuctionDashboard() {
         .single();
       return data;
     },
+    refetchInterval: 5000,
   });
 
   const { data: players = [] } = useQuery<any[]>({
@@ -151,6 +153,7 @@ export default function LiveAuctionDashboard() {
         .order("created_at", { ascending: true });
       return data || [];
     },
+    refetchInterval: 5000,
   });
 
   const { data: teams = [] } = useQuery<any[]>({
@@ -161,17 +164,19 @@ export default function LiveAuctionDashboard() {
           .from("teams")
           .select("id, team_name, captain_name, captain_image_url, team_logo_url")
       ).data || [],
+    refetchInterval: 5000,
   });
 
   const { data: rules = [] } = useQuery<any[]>({
     queryKey: ["dashboard", "rules"],
     queryFn: async () => (await supabase.from("auction_rules").select("*")).data || [],
+    refetchInterval: 5000,
   });
 
   const { data: auctionLogs = [] } = useQuery<any[]>({
     queryKey: ["dashboard", "auction_logs"],
     queryFn: async () => {
-      const response = await fetch("/api/dashboard/auction-log");
+      const response = await fetch("/api/dashboard/auction-log", { cache: "no-store" });
       if (!response.ok) {
         throw new Error("Failed to fetch dashboard auction logs");
       }
@@ -191,6 +196,7 @@ export default function LiveAuctionDashboard() {
         .limit(10);
       return data || [];
     },
+    refetchInterval: 5000,
   });
 
   const recentSales = useMemo(

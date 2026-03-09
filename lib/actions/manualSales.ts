@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { validateBid, checkCategoryEligibility } from "@/lib/validation/bidValidation";
 import { revalidateAuctionViews } from "@/lib/actions/revalidateAuctionViews";
 
@@ -81,12 +82,7 @@ export async function createManualSale(
       mode,
     });
 
-    const { data: currentUser } = await supabase.auth.getUser();
-    if (!currentUser.user) {
-      throw new Error("Not authenticated");
-    }
-
-    const { data: player } = await supabase
+    const { data: player } = await supabaseAdmin
       .from("players")
       .select("*")
       .eq("id", validated.playerId)
@@ -115,7 +111,7 @@ export async function createManualSale(
       throw new Error(validation.errors.join(", "));
     }
 
-    const { error: playerError } = await supabase
+    const { error: playerError } = await supabaseAdmin
       .from("players")
       .update({
         is_sold: true,
@@ -128,7 +124,7 @@ export async function createManualSale(
       throw new Error(`Failed to update player: ${playerError.message}`);
     }
 
-    const { data: teamRules } = await supabase
+    const { data: teamRules } = await supabaseAdmin
       .from("auction_rules")
       .select("current_purse")
       .eq("team_id", validated.teamId)
@@ -144,7 +140,7 @@ export async function createManualSale(
       );
     }
 
-    const { error: purseError } = await supabase
+    const { error: purseError } = await supabaseAdmin
       .from("auction_rules")
       .update({
         current_purse: teamRules.current_purse - validated.salePrice,
@@ -169,11 +165,10 @@ export async function createManualSale(
     }
 
     if (validated.mode === "override") {
-      await supabase.from("audit_log").insert({
+      await supabaseAdmin.from("audit_log").insert({
         action_type: "manual_sale",
         entity_type: "sale",
         entity_id: logResult.logId,
-        performed_by: currentUser.user.id,
         reason: "Override mode: bypassed validation",
         previous_state: {
           player_id: validated.playerId,
